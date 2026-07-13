@@ -1,15 +1,13 @@
-// Next-token selection from a single logits row, with the full set of sampling controls:
-// temperature (0 => greedy/argmax), top-k, and top-p (nucleus). Sampling draws from the
-// SamplingRng stream. These are MECHANISMS — buildable at any scale; output quality depends on
-// what training put in the weights (CAPABILITIES.md).
+// Next-token selection from a single logits row. Temperature (0 => greedy/argmax), top-k, and top-p
+// (nucleus). The stochastic path delegates to the shared Distribution helper so the exact same
+// temperature/top-k/top-p logic backs both sampling and speculative sampling (rule #4). These are
+// MECHANISMS — output quality depends on what training put in the weights (CAPABILITIES.md).
 
 import type { SeededRng } from "../Random/SeededRng.ts";
+import type { SamplingOptions } from "./Distribution.ts";
+import { ProbsFromLogits, SampleFromDistribution } from "./Distribution.ts";
 
-export type SamplingOptions = {
-  Temperature: number; // <= 0 => greedy argmax
-  TopK: number; // 0 => disabled
-  TopP: number; // 1 => disabled
-};
+export type { SamplingOptions } from "./Distribution.ts";
 
 export const DefaultSampling: SamplingOptions = { Temperature: 1, TopK: 0, TopP: 1 };
 
@@ -33,48 +31,5 @@ export function SampleFromLogits(
     }
     return Best;
   }
-
-  // Temperature-scaled softmax (max-subtracted).
-  const Probs = new Float64Array(VocabSize);
-  let Max = -Infinity;
-  for (let J = 0; J < VocabSize; J++) {
-    const Scaled = Logits[Offset + J] / Options.Temperature;
-    Probs[J] = Scaled;
-    if (Scaled > Max) Max = Scaled;
-  }
-  let Sum = 0;
-  for (let J = 0; J < VocabSize; J++) {
-    const E = Math.exp(Probs[J] - Max);
-    Probs[J] = E;
-    Sum += E;
-  }
-  for (let J = 0; J < VocabSize; J++) Probs[J] /= Sum;
-
-  // Candidate ids sorted by probability (descending), then top-k, then top-p.
-  let Indices: number[] = [];
-  for (let J = 0; J < VocabSize; J++) Indices.push(J);
-  Indices.sort((A, B) => Probs[B] - Probs[A]);
-
-  if (Options.TopK > 0 && Options.TopK < Indices.length) Indices = Indices.slice(0, Options.TopK);
-
-  if (Options.TopP < 1) {
-    const Kept: number[] = [];
-    let Cumulative = 0;
-    for (const Idx of Indices) {
-      Kept.push(Idx);
-      Cumulative += Probs[Idx];
-      if (Cumulative >= Options.TopP) break;
-    }
-    Indices = Kept;
-  }
-
-  // Renormalize over the kept set and sample.
-  let KeptSum = 0;
-  for (const Idx of Indices) KeptSum += Probs[Idx];
-  let R = Rng.NextFloat() * KeptSum;
-  for (const Idx of Indices) {
-    R -= Probs[Idx];
-    if (R <= 0) return Idx;
-  }
-  return Indices[Indices.length - 1];
+  return SampleFromDistribution(ProbsFromLogits(Logits, Offset, VocabSize, Options), Rng);
 }

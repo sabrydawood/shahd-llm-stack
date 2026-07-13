@@ -38,7 +38,21 @@ reject_reason, provenance, ingested_at. The embedding dimension must equal `Conf
 
 ## Web ingestion
 
-Network ingestion is behind `Config.Data.WebEnabled` (off by default). Callers tag inputs with an
-`Origin`: `local` and `web-permissive` are license-checked and can reach the Filtered tier;
-`web-general` is always routed to the isolated **Raw** tier (inspect-only, never training-eligible)
-regardless of license, because the license is unverified.
+Network ingestion is behind `Config.Data.WebEnabled`. Callers tag inputs with an `Origin`: `local`
+and `web-permissive` are license-checked and can reach the Filtered tier; `web-general` is always
+routed to the isolated **Raw** tier (inspect-only, never training-eligible) regardless of license,
+because the license is unverified.
+
+Two providers ship, both behind injected fetchers (so they are testable without the network and
+carry no hard API dependency):
+
+- **GitHub** (`CreateGitHubProvider`): pulls code files from repositories via the GitHub API, tagging
+  each with the repo's detected SPDX license → permissive ones become training-eligible.
+- **Web search** (`CreateWebSearchProvider`): searches (inject a Brave/Bing/SerpAPI backend), fetches
+  each page, converts to text → isolated Raw tier.
+
+```bash
+# GitHub is free unauthenticated (rate-limited); a token raises the limit. Brave enables web search.
+GITHUB_TOKEN=... BRAVE_API_KEY=... bun run foundry:ingest-web \
+  --Query="language:typescript license:mit stars:>500" --Store=postgres
+```

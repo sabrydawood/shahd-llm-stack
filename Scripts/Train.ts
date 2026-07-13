@@ -38,8 +38,9 @@ console.log(sum, doubled);
 
 function ReadCorpus(): string {
   for (const Arg of process.argv.slice(2)) {
-    if (Arg.startsWith("--Corpus=")) {
-      const Path = Arg.slice("--Corpus=".length);
+    const CorpusArg = Arg?.startsWith("--Corpus=") ? "--Corpus=" : Arg?.startsWith("-c=") ? "-c=" : null;
+    if (CorpusArg) {
+      const Path = Arg.slice(CorpusArg.length);
       if (existsSync(Path)) return readFileSync(Path, "utf8");
     }
   }

@@ -5,6 +5,7 @@
 
 import { TsBackend } from "../Brain/ComputeBackend/TsBackend.ts";
 import { GoBackend } from "../Brain/ComputeBackend/GoBackend.ts";
+import { GoFfiBackend } from "../Brain/ComputeBackend/GoFfiBackend.ts";
 import { SeededRng } from "../Brain/Random/SeededRng.ts";
 
 function RandBuffer(N: number, Rng: SeededRng): Float64Array {
@@ -40,12 +41,26 @@ const GoMs = (Bun.nanoseconds() - GoStart) / 1e6 / Repeats;
 
 Go.Close();
 
+// In-process FFI (if the cgo DLL was built).
+let FfiMs = NaN;
+let FfiDiff = NaN;
+try {
+  const Ffi = new GoFfiBackend();
+  const FfiOut = Ffi.MatMul(A, B, Size, Size, Size);
+  FfiDiff = 0;
+  for (let I = 0; I < TsOut.length; I++) FfiDiff = Math.max(FfiDiff, Math.abs(TsOut[I] - FfiOut[I]));
+  const FfiStart = Bun.nanoseconds();
+  for (let R = 0; R < Repeats; R++) Ffi.MatMul(A, B, Size, Size, Size);
+  FfiMs = (Bun.nanoseconds() - FfiStart) / 1e6 / Repeats;
+  Ffi.Close();
+} catch (Err) {
+  console.log(`  (FFI backend unavailable: ${(Err as Error).message})`);
+}
+
 console.log(`ComputeSpike (${Size}x${Size} @ ${Size}x${Size}, avg of ${Repeats}):`);
-console.log(`  parity maxAbsDiff = ${MaxDiff.toExponential(3)}`);
-console.log(`  TS backend      = ${TsMs.toFixed(2)} ms/matmul`);
-console.log(`  Go subprocess   = ${GoMs.toFixed(2)} ms/matmul (incl. stdio IPC)`);
-console.log(`  speedup (TS/Go) = ${(TsMs / GoMs).toFixed(2)}x`);
-console.log(
-  "Finding: in-process FFI (cgo) is blocked by the broken local gcc; the subprocess path works\n" +
-    "and is numerically exact, but pays IPC + async coloring — TS backend stays the sync default.",
-);
+console.log(`  TS backend       = ${TsMs.toFixed(2)} ms/matmul`);
+console.log(`  Go subprocess    = ${GoMs.toFixed(2)} ms/matmul (parity ${MaxDiff.toExponential(1)}, incl. IPC)`);
+if (!Number.isNaN(FfiMs)) {
+  console.log(`  Go FFI in-proc   = ${FfiMs.toFixed(2)} ms/matmul (parity ${FfiDiff.toExponential(1)}, zero IPC)`);
+  console.log(`  speedup FFI vs TS = ${(TsMs / FfiMs).toFixed(2)}x`);
+}

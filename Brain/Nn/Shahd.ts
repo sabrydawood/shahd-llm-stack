@@ -9,24 +9,24 @@ import { MatMul, AddBias, Transpose } from "../Ops/OpsBarrel.ts";
 import { Zeros } from "../Tensor/TensorFactories.ts";
 import { Embedding } from "./Embedding.ts";
 import { Block } from "./Block.ts";
-import { LayerNormModule } from "./LayerNormModule.ts";
+import { NormLayer } from "./NormLayer.ts";
 import { InitWeight } from "./InitPolicy.ts";
 
 export class Shahd {
   Config: ResolvedConfig;
   Embedding: Embedding;
   Blocks: Block[] = [];
-  LnFinal: LayerNormModule;
+  LnFinal: NormLayer;
   LmHead: Tensor | null; // null when weights are tied (head = transpose of token embedding)
   LmHeadBias: Tensor; // [1, VocabSize]
   WeightTying: boolean;
 
   constructor(Config: ResolvedConfig, Rng: SeededRng) {
-    const { EmbedDim, VocabSize, NumLayers, LayerNormEps } = Config.Model;
+    const { EmbedDim, VocabSize, NumLayers } = Config.Model;
     this.Config = Config;
     this.Embedding = new Embedding(Config, Rng);
     for (let L = 0; L < NumLayers; L++) this.Blocks.push(new Block(Config, Rng));
-    this.LnFinal = new LayerNormModule(EmbedDim, LayerNormEps);
+    this.LnFinal = new NormLayer(EmbedDim, Config);
     this.WeightTying = Config.Model.WeightTying;
     this.LmHead = this.WeightTying ? null : InitWeight(EmbedDim, VocabSize, Rng, Config);
     this.LmHeadBias = Zeros(1, VocabSize);

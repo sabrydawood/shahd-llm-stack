@@ -5,5 +5,5 @@ export { Block } from "./Block.ts";
 export { Embedding } from "./Embedding.ts";
 export { MultiHeadAttention } from "./MultiHeadAttention.ts";
 export { Mlp } from "./Mlp.ts";
-export { LayerNormModule } from "./LayerNormModule.ts";
+export { NormLayer } from "./NormLayer.ts";
 export { InitWeight } from "./InitPolicy.ts";

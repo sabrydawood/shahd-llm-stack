@@ -5,21 +5,21 @@ import type { Tensor } from "../Tensor/Tensor.ts";
 import type { SeededRng } from "../Random/SeededRng.ts";
 import type { ResolvedConfig } from "../Config/ConfigTypes.ts";
 import { Add } from "../Ops/OpsBarrel.ts";
-import { LayerNormModule } from "./LayerNormModule.ts";
+import { NormLayer } from "./NormLayer.ts";
 import { MultiHeadAttention } from "./MultiHeadAttention.ts";
 import { Mlp } from "./Mlp.ts";
 
 export class Block {
-  Ln1: LayerNormModule;
+  Ln1: NormLayer;
   Attn: MultiHeadAttention;
-  Ln2: LayerNormModule;
+  Ln2: NormLayer;
   Mlp: Mlp;
 
   constructor(Config: ResolvedConfig, Rng: SeededRng) {
-    const { EmbedDim, LayerNormEps } = Config.Model;
-    this.Ln1 = new LayerNormModule(EmbedDim, LayerNormEps);
+    const { EmbedDim } = Config.Model;
+    this.Ln1 = new NormLayer(EmbedDim, Config);
     this.Attn = new MultiHeadAttention(Config, Rng);
-    this.Ln2 = new LayerNormModule(EmbedDim, LayerNormEps);
+    this.Ln2 = new NormLayer(EmbedDim, Config);
     this.Mlp = new Mlp(Config, Rng);
   }
 

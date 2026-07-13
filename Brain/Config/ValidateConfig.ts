@@ -20,6 +20,10 @@ export const ModelSchema = z.object({
   WeightTying: z.boolean(), // tie token embedding with the LM head
   InitScale: z.number().positive(), // stddev for randn weight init
   UseScaledResidualInit: z.boolean(), // scale residual-projection init by 1/sqrt(2*NumLayers)
+  // Architecture staples (Phase-2 lock). Defaults keep Phase-1 behavior; modern stack opts in.
+  PositionScheme: z.enum(["Learned", "Rope"]), // learned absolute vs rotary positions
+  NormKind: z.enum(["LayerNorm", "RmsNorm"]),
+  MlpKind: z.enum(["Relu", "SwiGlu", "GeGlu"]),
 });
 
 export const OptimizerSchema = z.object({
@@ -83,6 +87,13 @@ export const ShahdConfigSchema = z
         code: z.ZodIssueCode.custom,
         path: ["Model", "NumHeads"],
         message: `EmbedDim (${Config.Model.EmbedDim}) must be divisible by NumHeads (${Config.Model.NumHeads}).`,
+      });
+    }
+    if (Config.Model.PositionScheme === "Rope" && (Config.Model.EmbedDim / Config.Model.NumHeads) % 2 !== 0) {
+      Ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["Model", "PositionScheme"],
+        message: `RoPE requires an even head dim; EmbedDim/NumHeads = ${Config.Model.EmbedDim / Config.Model.NumHeads} is odd.`,
       });
     }
     if (Config.Schedule.WarmupSteps > Config.Schedule.MaxSteps) {

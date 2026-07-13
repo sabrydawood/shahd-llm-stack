@@ -40,12 +40,18 @@ function LayerNormRow(X: Float64Array, Gamma: Float64Array, Beta: Float64Array, 
 /** Process one token at absolute Position, updating the cache; returns next-token logits [VocabSize]. */
 export function CachedForwardStep(Model: Shahd, Cache: KvCache, TokenId: number, Position: number): Float64Array {
   const Cfg = Model.Config;
+  if (Cfg.Model.PositionScheme !== "Learned" || Cfg.Model.NormKind !== "LayerNorm" || Cfg.Model.MlpKind !== "Relu") {
+    throw new Error(
+      "CachedForwardStep: the KV-cache path currently supports only the Learned/LayerNorm/Relu " +
+        "architecture; use the uncached Generate for the modern (RoPE/RMSNorm/SwiGLU) stack.",
+    );
+  }
   const E = Cfg.Model.EmbedDim;
   const NumHeads = Cfg.Model.NumHeads;
   const HeadDim = Cfg.Derived.HeadDim;
   const Scale = Cfg.Derived.AttentionScale;
   const Wte = Model.Embedding.Wte.Data;
-  const Wpe = Model.Embedding.Wpe.Data;
+  const Wpe = Model.Embedding.Wpe!.Data; // non-null: guard above ensures learned positions
 
   const X = new Float64Array(E);
   for (let J = 0; J < E; J++) X[J] = Wte[TokenId * E + J] + Wpe[Position * E + J];
@@ -53,7 +59,7 @@ export function CachedForwardStep(Model: Shahd, Cache: KvCache, TokenId: number,
   for (let L = 0; L < Model.Blocks.length; L++) {
     const Block = Model.Blocks[L];
     const Attn = Block.Attn;
-    const Xn = LayerNormRow(X, Block.Ln1.Gamma.Data, Block.Ln1.Beta.Data, Block.Ln1.Eps, E);
+    const Xn = LayerNormRow(X, Block.Ln1.Gamma.Data, Block.Ln1.Beta!.Data, Block.Ln1.Eps, E);
 
     const AttnOut = new Float64Array(E);
     for (let Hd = 0; Hd < NumHeads; Hd++) {
@@ -92,20 +98,20 @@ export function CachedForwardStep(Model: Shahd, Cache: KvCache, TokenId: number,
     }
     for (let J = 0; J < E; J++) X[J] += AttnOut[J]; // residual
 
-    const Xn2 = LayerNormRow(X, Block.Ln2.Gamma.Data, Block.Ln2.Beta.Data, Block.Ln2.Eps, E);
+    const Xn2 = LayerNormRow(X, Block.Ln2.Gamma.Data, Block.Ln2.Beta!.Data, Block.Ln2.Eps, E);
     const Hidden = Cfg.Derived.MlpHidden;
-    const H1 = MatMulRow(Xn2, Block.Mlp.Wfc.Data, E, Hidden);
-    const Bfc = Block.Mlp.Bfc.Data;
+    const H1 = MatMulRow(Xn2, Block.Mlp.Wfc!.Data, E, Hidden);
+    const Bfc = Block.Mlp.Bfc!.Data;
     for (let J = 0; J < Hidden; J++) {
       const Val = H1[J] + Bfc[J];
       H1[J] = Val > 0 ? Val : 0; // ReLU
     }
-    const H2 = MatMulRow(H1, Block.Mlp.Wproj.Data, Hidden, E);
-    const Bproj = Block.Mlp.Bproj.Data;
+    const H2 = MatMulRow(H1, Block.Mlp.Wproj!.Data, Hidden, E);
+    const Bproj = Block.Mlp.Bproj!.Data;
     for (let J = 0; J < E; J++) X[J] += H2[J] + Bproj[J]; // residual + bias
   }
 
-  const Xf = LayerNormRow(X, Model.LnFinal.Gamma.Data, Model.LnFinal.Beta.Data, Model.LnFinal.Eps, E);
+  const Xf = LayerNormRow(X, Model.LnFinal.Gamma.Data, Model.LnFinal.Beta!.Data, Model.LnFinal.Eps, E);
 
   const VocabSize = Cfg.Model.VocabSize;
   const Bias = Model.LmHeadBias.Data;

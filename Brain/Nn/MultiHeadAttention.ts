@@ -6,7 +6,7 @@
 import type { Tensor } from "../Tensor/Tensor.ts";
 import type { SeededRng } from "../Random/SeededRng.ts";
 import type { ResolvedConfig } from "../Config/ConfigTypes.ts";
-import { MatMul, Transpose, Scale, CausalMask, SoftmaxRows, Add } from "../Ops/OpsBarrel.ts";
+import { MatMul, Transpose, Scale, CausalMask, SoftmaxRows, Add, ApplyRope } from "../Ops/OpsBarrel.ts";
 import { InitWeight } from "./InitPolicy.ts";
 
 export class MultiHeadAttention {
@@ -16,12 +16,14 @@ export class MultiHeadAttention {
   WoHeads: Tensor[] = []; // each [HeadDim, EmbedDim] (residual projection)
   NumHeads: number;
   AttentionScale: number;
+  UseRope: boolean;
 
   constructor(Config: ResolvedConfig, Rng: SeededRng) {
     const { EmbedDim, NumHeads } = Config.Model;
     const { HeadDim, AttentionScale } = Config.Derived;
     this.NumHeads = NumHeads;
     this.AttentionScale = AttentionScale;
+    this.UseRope = Config.Model.PositionScheme === "Rope";
     for (let H = 0; H < NumHeads; H++) {
       this.WqHeads.push(InitWeight(EmbedDim, HeadDim, Rng, Config));
       this.WkHeads.push(InitWeight(EmbedDim, HeadDim, Rng, Config));
@@ -33,9 +35,13 @@ export class MultiHeadAttention {
   Forward(X: Tensor): Tensor {
     let Output: Tensor | null = null;
     for (let H = 0; H < this.NumHeads; H++) {
-      const Q = MatMul(X, this.WqHeads[H]); // [T, HeadDim]
-      const K = MatMul(X, this.WkHeads[H]);
+      let Q = MatMul(X, this.WqHeads[H]); // [T, HeadDim]
+      let K = MatMul(X, this.WkHeads[H]);
       const V = MatMul(X, this.WvHeads[H]);
+      if (this.UseRope) {
+        Q = ApplyRope(Q, 0); // training forward starts at absolute position 0
+        K = ApplyRope(K, 0);
+      }
       let Scores = MatMul(Q, Transpose(K)); // [T, T]
       Scores = Scale(Scores, this.AttentionScale);
       Scores = CausalMask(Scores);

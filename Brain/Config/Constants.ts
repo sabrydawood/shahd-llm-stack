@@ -20,6 +20,9 @@ export const DefaultConfig: ShahdConfig = {
     WeightTying: true, // tie token embedding <-> LM head (decided at Phase 1 per ARCHITECTURE)
     InitScale: 0.02,
     UseScaledResidualInit: true, // 1/sqrt(2*NumLayers) on residual-projection weights
+    PositionScheme: "Learned", // "Learned" | "Rope" — default keeps Phase-1 behavior
+    NormKind: "LayerNorm", // "LayerNorm" | "RmsNorm"
+    MlpKind: "Relu", // "Relu" | "SwiGlu" | "GeGlu"
   },
   Optimizer: {
     Kind: "AdamW",

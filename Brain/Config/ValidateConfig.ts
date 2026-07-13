@@ -93,6 +93,13 @@ export const ComputeSchema = z.object({
   FallbackToCpu: z.boolean(),
 });
 
+// DATA (the Foundry): toggles for the tiered dataset layer. WebEnabled gates network ingestion
+// (permissive sources are training-eligible; general web is stored isolated for inspection only).
+export const DataSchema = z.object({
+  WebEnabled: z.boolean(),
+  EmbeddingDim: PositiveInt,
+});
+
 export const ShahdConfigSchema = z
   .object({
     Model: ModelSchema,
@@ -104,6 +111,7 @@ export const ShahdConfigSchema = z
     Limits: LimitsSchema,
     Tools: ToolsSchema,
     Compute: ComputeSchema,
+    Data: DataSchema,
   })
   .superRefine((Config, Ctx) => {
     // L4 guard: attention scale = 1/sqrt(HeadDim) is only correct when heads evenly split EmbedDim.

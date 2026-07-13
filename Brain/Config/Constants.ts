@@ -70,4 +70,8 @@ export const DefaultConfig: ShahdConfig = {
     Precision: "F64", // "F64" (exact, gradient-checkable) | "F32" (mixed-precision, GPU-prep)
     FallbackToCpu: true, // drop to CPU if the chosen backend is unavailable
   },
+  Data: {
+    WebEnabled: false, // network ingestion OFF by default (local dirs always allowed)
+    EmbeddingDim: 256, // Foundry embedding dimension
+  },
 };

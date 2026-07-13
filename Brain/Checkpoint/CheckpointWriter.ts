@@ -21,6 +21,7 @@ function ExtractShahdConfig(Config: ResolvedConfig): ShahdConfig {
     Limits: Config.Limits,
     Tools: Config.Tools,
     Compute: Config.Compute,
+    Data: Config.Data,
   };
 }
 

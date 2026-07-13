@@ -71,7 +71,7 @@ export const DefaultConfig: ShahdConfig = {
     FallbackToCpu: true, // drop to CPU if the chosen backend is unavailable
   },
   Data: {
-    WebEnabled: false, // network ingestion OFF by default (local dirs always allowed)
+    WebEnabled: true, // web ingestion enabled (the network fetch provider is built separately)
     EmbeddingDim: 256, // Foundry embedding dimension
   },
 };

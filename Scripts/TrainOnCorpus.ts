@@ -20,6 +20,7 @@ import { Logger } from "../Brain/Logging/Logger.ts";
 import { Generate } from "../Brain/Sampling/Generate.ts";
 import { DefaultSampling } from "../Brain/Sampling/Sampler.ts";
 import { SaveCheckpoint } from "../Brain/Checkpoint/CheckpointWriter.ts";
+import { ActivateFromConfig } from "../Brain/ComputeBackend/BackendSelector.ts";
 import { ReadArg } from "./ScriptArgs.ts";
 
 type ManifestEntry = { Source: string; License: string; Path: string };
@@ -51,6 +52,8 @@ const Config = LoadConfig({
   UseEnv: false,
 });
 
+const ComputeChoice = ActivateFromConfig(Config); // default Ts/F64 => inline fast path
+console.log(`compute backend: ${ComputeChoice.Chosen}${ComputeChoice.FellBack ? " (fell back)" : ""}`);
 const Rng = CreateRngStreams(Config.Training.Seed);
 const { Train, Val } = TrainValSplit(Encoded, 0.1);
 const TrainLoader = new InMemoryDataLoader(Train, Config.Model.BlockSize, Rng.DataRng);

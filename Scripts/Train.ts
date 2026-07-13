@@ -18,6 +18,7 @@ import { Logger } from "../Brain/Logging/Logger.ts";
 import { Generate } from "../Brain/Sampling/Generate.ts";
 import { DefaultSampling } from "../Brain/Sampling/Sampler.ts";
 import { SaveCheckpoint } from "../Brain/Checkpoint/CheckpointWriter.ts";
+import { ActivateFromConfig } from "../Brain/ComputeBackend/BackendSelector.ts";
 
 const SampleCode = `function add(a, b) {
   return a + b;
@@ -55,6 +56,9 @@ const Encoded = Tokenizer.Encode(CorpusText);
 // Size the model's vocab to the tokenizer (authoritative), then apply CLI overrides on top.
 const Config = LoadConfig({ Overrides: { Model: { VocabSize: Tokenizer.VocabSize } } });
 
+// Activate the configured compute backend (default Ts/F64 => inline fast path, unchanged).
+const ComputeChoice = ActivateFromConfig(Config);
+
 const Rng = CreateRngStreams(Config.Training.Seed);
 const { Train, Val } = TrainValSplit(Encoded, 0.1);
 const TrainLoader = new InMemoryDataLoader(Train, Config.Model.BlockSize, Rng.DataRng);
@@ -75,6 +79,7 @@ RunLogger.Log({
   BlockSize: Config.Model.BlockSize,
   MaxSteps: Config.Schedule.MaxSteps,
   ConfigHash: Config.ConfigHash,
+  Compute: ComputeChoice.Chosen,
 });
 
 TrainLoop(Model, Optimizer, TrainLoader, ValLoader, Config, RunLogger);

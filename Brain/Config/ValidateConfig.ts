@@ -83,6 +83,16 @@ export const ToolsSchema = z.object({
   MaxFileBytes: PositiveInt, // per-file read/write byte cap
 });
 
+// COMPUTE (performance): selects the numeric backend for the matmul hot path. "Ts" with "F64" is
+// the exact default (inline, gradient-checkable). "GoFfi" routes to the in-process Go kernel;
+// "F32" is the mixed-precision path and the GPU prerequisite. FallbackToCpu drops to CPU when the
+// chosen backend is unavailable, so a machine without a working GPU/FFI still runs.
+export const ComputeSchema = z.object({
+  Backend: z.enum(["Ts", "GoFfi", "Gpu"]),
+  Precision: z.enum(["F64", "F32"]),
+  FallbackToCpu: z.boolean(),
+});
+
 export const ShahdConfigSchema = z
   .object({
     Model: ModelSchema,
@@ -93,6 +103,7 @@ export const ShahdConfigSchema = z
     Safety: SafetySchema,
     Limits: LimitsSchema,
     Tools: ToolsSchema,
+    Compute: ComputeSchema,
   })
   .superRefine((Config, Ctx) => {
     // L4 guard: attention scale = 1/sqrt(HeadDim) is only correct when heads evenly split EmbedDim.

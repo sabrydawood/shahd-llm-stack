@@ -20,6 +20,7 @@ function ExtractShahdConfig(Config: ResolvedConfig): ShahdConfig {
     Safety: Config.Safety,
     Limits: Config.Limits,
     Tools: Config.Tools,
+    Compute: Config.Compute,
   };
 }
 

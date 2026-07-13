@@ -65,4 +65,9 @@ export const DefaultConfig: ShahdConfig = {
     MaxToolSteps: 6, // agent-loop budget
     MaxFileBytes: 262144, // 256 KiB read/write cap
   },
+  Compute: {
+    Backend: "Ts", // "Ts" | "GoFfi" | "Gpu" — Ts is the inline default
+    Precision: "F64", // "F64" (exact, gradient-checkable) | "F32" (mixed-precision, GPU-prep)
+    FallbackToCpu: true, // drop to CPU if the chosen backend is unavailable
+  },
 };

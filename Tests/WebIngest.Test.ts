@@ -7,29 +7,78 @@ import {
   HtmlToText,
 } from "../Foundry/FoundryBarrel.ts";
 import type { HttpJson, SearchBackend, PageFetch } from "../Foundry/FoundryBarrel.ts";
+import { IsSubstantiveCodePath, IsSubstantiveCodeContent } from "../Foundry/CodeFileFilter.ts";
 
-// Mock GitHub HTTP: one MIT repo, one code file (base64), so no real network is used.
+// A substantive code file (passes the content gate); the tiny stub the old test used would now be
+// correctly rejected as too small.
+const SampleCode = `import { readFileSync } from "node:fs";
+
+export type Config = { name: string; retries: number };
+
+export function loadConfig(path: string): Config {
+  const raw = readFileSync(path, "utf8");
+  const parsed = JSON.parse(raw) as Partial<Config>;
+  return {
+    name: parsed.name ?? "default",
+    retries: typeof parsed.retries === "number" ? parsed.retries : 3,
+  };
+}
+
+export function withRetries<T>(fn: () => T, times: number): T {
+  let lastError: unknown;
+  for (let i = 0; i < times; i++) {
+    try {
+      return fn();
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+`;
+
+// Mock GitHub HTTP: one MIT repo whose tree has a substantive src file plus junk that must be filtered.
 const MockHttp: HttpJson = async (Url) => {
   if (Url.includes("/search/repositories")) {
     return { items: [{ full_name: "acme/util", default_branch: "main", license: { spdx_id: "MIT" } }] };
   }
   if (Url.includes("/git/trees/")) {
-    return { tree: [{ path: "src/Add.ts", type: "blob" }, { path: "README.md", type: "blob" }] };
+    return {
+      tree: [
+        { path: "benchmarks/demo.css", type: "blob" }, // junk dir + markup -> excluded
+        { path: "src/types.d.ts", type: "blob" }, // declaration file -> excluded
+        { path: "README.md", type: "blob" }, // not code -> excluded
+        { path: "src/Config.ts", type: "blob" }, // the real source file -> kept
+      ],
+    };
   }
   if (Url.includes("/contents/")) {
-    return { encoding: "base64", content: Buffer.from("export function add(a, b) {\n  return a + b;\n}\n").toString("base64") };
+    return { encoding: "base64", content: Buffer.from(SampleCode).toString("base64") };
   }
   return {};
 };
 
-test("GitHub provider tags files web-permissive with the repo license", async () => {
+test("GitHub provider keeps only substantive source (filters markup, declarations, junk dirs)", async () => {
   const Provider = CreateGitHubProvider({ Http: MockHttp });
   const Docs = await Provider.Fetch("language:typescript", 5);
-  expect(Docs.length).toBe(1); // only the .ts file, not README.md
+  expect(Docs.length).toBe(1); // only src/Config.ts — the .css/.d.ts/.md are all filtered out
   expect(Docs[0].Origin).toBe("web-permissive");
   expect(Docs[0].License).toBe("MIT");
   expect(Docs[0].Lang).toBe("typescript");
-  expect(Docs[0].Content).toContain("export function add");
+  expect(Docs[0].Provenance).toContain("src/Config.ts");
+  expect(Docs[0].Content).toContain("loadConfig");
+});
+
+test("code file filter rejects junk paths and thin content, keeps real source", () => {
+  expect(IsSubstantiveCodePath("src/Parser.ts")).toBe(true);
+  expect(IsSubstantiveCodePath("packages/core/lib/Engine.go")).toBe(true);
+  expect(IsSubstantiveCodePath("benchmarks/big-table/demo.css")).toBe(false); // junk dir + markup
+  expect(IsSubstantiveCodePath("src/types.d.ts")).toBe(false); // declaration
+  expect(IsSubstantiveCodePath(".eslint-plugin-local/x.ts")).toBe(false); // dot-dir
+  expect(IsSubstantiveCodePath("test/foo.test.ts")).toBe(false); // test dir + .test
+  expect(IsSubstantiveCodePath("README.md")).toBe(false); // not code
+  expect(IsSubstantiveCodeContent('declare module "*.txt" { const c: string }\n')).toBe(false); // stub
+  expect(IsSubstantiveCodeContent(SampleCode)).toBe(true);
 });
 
 test("HtmlToText strips tags, script/style, and entities", () => {

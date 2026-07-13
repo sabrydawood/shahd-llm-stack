@@ -6,7 +6,7 @@
 //   GITHUB_TOKEN=... BRAVE_API_KEY=... bun run Scripts/IngestWeb.ts --Query="language:typescript license:mit stars:>100" --Store=postgres
 
 import { LoadConfig } from "../Brain/Config/LoadConfig.ts";
-import { InMemoryDocumentStore, IngestFromWeb, CreateGitHubProvider, CreateWebSearchProvider, BuildReport, RenderReportText } from "../Foundry/FoundryBarrel.ts";
+import { InMemoryDocumentStore, IngestFromWeb, CreateGitHubRepoProvider, CreateWebSearchProvider, BuildReport, RenderReportText } from "../Foundry/FoundryBarrel.ts";
 import type { WebProvider, SearchBackend, DocumentStore } from "../Foundry/FoundryBarrel.ts";
 import { PostgresDocumentStore } from "../Foundry/PostgresDocumentStore.ts";
 import { ReadArg } from "./ScriptArgs.ts";
@@ -33,7 +33,14 @@ const Store: DocumentStore = ReadArg("--Store=", "memory") === "postgres"
   ? new PostgresDocumentStore(process.env["DATABASE_URL"] ?? "postgres://postgres:postgres@localhost:5432/shahd")
   : new InMemoryDocumentStore();
 
-const Providers: WebProvider[] = [CreateGitHubProvider({ Token: process.env["GITHUB_TOKEN"] })];
+const Providers: WebProvider[] = [
+  CreateGitHubRepoProvider({
+    Token: process.env["GITHUB_TOKEN"],
+    MinLevel: "medium",
+    OnRepo: (Info) =>
+      console.log(`  ${Info.Repo}: level=${Info.Assessment.Level} files=${Info.Assessment.FileCount} avgQ=${Info.Assessment.AvgQuality.toFixed(2)} bytes=${Info.Assessment.TotalBytes} -> ${Info.Ingested ? "INGESTED WHOLE" : "skipped"}`),
+  }),
+];
 const BraveKey = process.env["BRAVE_API_KEY"];
 if (BraveKey !== undefined) Providers.push(CreateWebSearchProvider({ Search: BraveSearch(BraveKey) }));
 

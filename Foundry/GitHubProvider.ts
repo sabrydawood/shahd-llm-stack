@@ -8,25 +8,17 @@
 
 import type { WebProvider } from "./WebSource.ts";
 import type { SourceInput } from "./Ingest.ts";
+import type { HttpJson } from "./GitHubHttp.ts";
+import { DefaultGitHubJson } from "./GitHubHttp.ts";
 import { IsSubstantiveCodePath, IsSubstantiveCodeContent, RankCodePath, LangForPath } from "./CodeFileFilter.ts";
 
-export type HttpJson = (Url: string) => Promise<unknown>;
+export type { HttpJson } from "./GitHubHttp.ts";
 
 type RepoItem = { full_name: string; default_branch: string; license: { spdx_id: string } | null };
 type SearchResult = { items?: RepoItem[] };
 type TreeEntry = { path: string; type: string };
 type TreeResult = { tree?: TreeEntry[] };
 type ContentResult = { content?: string; encoding?: string };
-
-function DefaultHttp(Token?: string): HttpJson {
-  return async (Url: string): Promise<unknown> => {
-    const Headers: Record<string, string> = { "User-Agent": "shahd-foundry", Accept: "application/vnd.github+json" };
-    if (Token !== undefined) Headers["Authorization"] = `Bearer ${Token}`;
-    const Response = await fetch(Url, { headers: Headers });
-    if (!Response.ok) throw new Error(`GitHub API ${Response.status}`);
-    return Response.json();
-  };
-}
 
 function DecodeContent(Content: ContentResult): string {
   return Content.encoding === "base64" && Content.content !== undefined
@@ -37,7 +29,7 @@ function DecodeContent(Content: ContentResult): string {
 export type GitHubOptions = { Token?: string; Http?: HttpJson; FilesPerRepo?: number };
 
 export function CreateGitHubProvider(Options: GitHubOptions = {}): WebProvider {
-  const Http = Options.Http ?? DefaultHttp(Options.Token);
+  const Http = Options.Http ?? DefaultGitHubJson(Options.Token);
   const FilesPerRepo = Options.FilesPerRepo ?? 3;
   return {
     Name: "github",

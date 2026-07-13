@@ -12,7 +12,7 @@
     "gradcheck": "bun run Scripts/RunGradCheck.ts",
     "train": "bun run Scripts/Train.ts",
     "sample": "bun run Scripts/Sample.ts",
-    "dashboard" : "bun run Scripts/StartDashboard.ts",
+    "dashboard": "bun run Scripts/StartDashboard.ts",
     "train:bpe": "bun run Scripts/TrainBpeMerges.ts",
     "foundry": "bun run Scripts/RunFoundry.ts",
     "foundry:dashboard": "bun run Scripts/StartDashboard.ts",
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
+    "nanotar": "^0.3.0",
     "postgres": "^3.4.9",
     "zod": "^3.23.8"
   },

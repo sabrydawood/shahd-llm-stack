@@ -46,4 +46,12 @@ export const DefaultConfig: ShahdConfig = {
   Tokenizer: {
     Kind: "Char",
   },
+  Safety: {
+    Enabled: true, // safety on by default (absolute priority)
+    Level: "Standard", // "Off" | "Standard" | "Strict" — controllable strength
+  },
+  Limits: {
+    MaxNewTokens: 1024, // hard cap on tokens per generation
+    MaxContextTokens: 4096, // hard cap on prompt/context tokens fed to the model
+  },
 };

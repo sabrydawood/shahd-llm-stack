@@ -52,6 +52,20 @@ export const TokenizerSchema = z.object({
   MergesPath: z.string().optional(), // required for Bpe; path to trained merges
 });
 
+// SAFETY (absolute priority, in one controllable place): a deterministic external content
+// filter for the serving/generation boundary. Level tunes strictness; Off disables it entirely.
+export const SafetySchema = z.object({
+  Enabled: z.boolean(),
+  Level: z.enum(["Off", "Standard", "Strict"]),
+});
+
+// LIMITS (performance/resource guardrails): hard bounds enforced at generation time so bad
+// input or a runaway loop cannot blow past expected resource use.
+export const LimitsSchema = z.object({
+  MaxNewTokens: PositiveInt,
+  MaxContextTokens: PositiveInt,
+});
+
 export const ShahdConfigSchema = z
   .object({
     Model: ModelSchema,
@@ -59,6 +73,8 @@ export const ShahdConfigSchema = z
     Schedule: ScheduleSchema,
     Training: TrainingSchema,
     Tokenizer: TokenizerSchema,
+    Safety: SafetySchema,
+    Limits: LimitsSchema,
   })
   .superRefine((Config, Ctx) => {
     // L4 guard: attention scale = 1/sqrt(HeadDim) is only correct when heads evenly split EmbedDim.

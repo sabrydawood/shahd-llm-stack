@@ -17,6 +17,8 @@ function ExtractShahdConfig(Config: ResolvedConfig): ShahdConfig {
     Schedule: Config.Schedule,
     Training: Config.Training,
     Tokenizer: Config.Tokenizer,
+    Safety: Config.Safety,
+    Limits: Config.Limits,
   };
 }
 

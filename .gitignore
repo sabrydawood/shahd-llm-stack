@@ -31,6 +31,7 @@ GoKernels/*.dll
 GoKernels/*.so
 GoKernels/*.dylib
 GoKernels/*.h
+GoKernels/worker.exe
 
 Plan/ARCHITECTURE.md
 Plan/CAPABILITIES.md
@@ -39,3 +40,6 @@ Plan/PHASE1.md
 Plan/REVIEW.md
 Plan/SPEC.md
 App/nano-gpt.ts
+
+# Go build artifacts (executables)
+GoKernels/*.exe

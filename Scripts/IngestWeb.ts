@@ -1,20 +1,20 @@
-// Ingest from the web into the Foundry (M6). Gated by Config.Data.WebEnabled. GitHub-permissive
-// files become training-eligible (after license/quality tiering); general web search results are
-// stored in the isolated Raw tier. Provide credentials via env; nothing reaches the network without
-// them beyond public GitHub (rate-limited).
-//
-//   GITHUB_TOKEN=... BRAVE_API_KEY=... bun run Scripts/IngestWeb.ts --Query="language:typescript license:mit stars:>100" --Store=postgres
+// Ingest from the web into the Foundry. Reads everything from the environment (Bun loads .env):
+// DATABASE_URL (=> Postgres by default), GITHUB_TOKEN, BRAVE_API_KEY, FOUNDRY_QUERY, FOUNDRY_STORE.
+// GitHub repos are ingested WHOLE (permissive -> training-eligible); general web search (if
+// BRAVE_API_KEY is set) is isolated to the Raw tier. Gated by Config.Data.WebEnabled.
+//   bun run foundry:ingest-web                 # uses .env
+//   bun run foundry:ingest-web --Query="language:go stars:>2000" --Store=postgres
 
 import { LoadConfig } from "../Brain/Config/LoadConfig.ts";
-import { InMemoryDocumentStore, IngestFromWeb, CreateGitHubRepoProvider, CreateWebSearchProvider, BuildReport, RenderReportText } from "../Foundry/FoundryBarrel.ts";
-import type { WebProvider, SearchBackend, DocumentStore } from "../Foundry/FoundryBarrel.ts";
-import { PostgresDocumentStore } from "../Foundry/PostgresDocumentStore.ts";
+import { IngestFromWeb, CreateGitHubRepoProvider, CreateWebSearchProvider, BuildReport, RenderReportText } from "../Foundry/FoundryBarrel.ts";
+import type { WebProvider, SearchBackend } from "../Foundry/FoundryBarrel.ts";
+import { ResolveStore, Query, GitHubToken, BraveKey } from "./FoundryEnv.ts";
 import { ReadArg } from "./ScriptArgs.ts";
 
 // Brave Search backend (used only if BRAVE_API_KEY is set); swap for any search API by shape.
 function BraveSearch(Key: string): SearchBackend {
-  return async (Query, Limit) => {
-    const Response = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(Query)}&count=${Limit}`, {
+  return async (Q, Limit) => {
+    const Response = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(Q)}&count=${Limit}`, {
       headers: { "X-Subscription-Token": Key, Accept: "application/json" },
     });
     if (!Response.ok) throw new Error(`Brave ${Response.status}`);
@@ -29,24 +29,21 @@ if (!Config.Data.WebEnabled) {
   process.exit(0);
 }
 
-const Store: DocumentStore = ReadArg("--Store=", "memory") === "postgres"
-  ? new PostgresDocumentStore(process.env["DATABASE_URL"] ?? "postgres://postgres:postgres@localhost:5432/shahd")
-  : new InMemoryDocumentStore();
-
+const { Store, Kind } = ResolveStore();
 const Providers: WebProvider[] = [
   CreateGitHubRepoProvider({
-    Token: process.env["GITHUB_TOKEN"],
+    Token: GitHubToken(),
     MinLevel: "medium",
     OnRepo: (Info) =>
-      console.log(`  ${Info.Repo}: level=${Info.Assessment.Level} files=${Info.Assessment.FileCount} avgQ=${Info.Assessment.AvgQuality.toFixed(2)} bytes=${Info.Assessment.TotalBytes} -> ${Info.Ingested ? "INGESTED WHOLE" : "skipped"}`),
+      console.log(`  ${Info.Repo}: level=${Info.Assessment.Level} files=${Info.Assessment.FileCount} avgQ=${Info.Assessment.AvgQuality.toFixed(2)} -> ${Info.Ingested ? "INGESTED WHOLE" : "skipped"}`),
   }),
 ];
-const BraveKey = process.env["BRAVE_API_KEY"];
-if (BraveKey !== undefined) Providers.push(CreateWebSearchProvider({ Search: BraveSearch(BraveKey) }));
+const Brave = BraveKey();
+if (Brave !== undefined) Providers.push(CreateWebSearchProvider({ Search: BraveSearch(Brave) }));
 
-const Queries = [ReadArg("--Query=", "language:typescript license:mit stars:>500")];
-console.log(`ingesting from: ${Providers.map((P) => P.Name).join(", ")}  |  query: ${JSON.stringify(Queries[0])}`);
+const Queries = [Query("language:typescript license:mit stars:>500")];
+console.log(`store=${Kind} | token=${GitHubToken() ? "yes" : "no (rate-limited)"} | providers=${Providers.map((P) => P.Name).join(",")} | query=${JSON.stringify(Queries[0])}\n`);
 
 const Stats = await IngestFromWeb(Providers, Queries, Store, new Date().toISOString(), Number(ReadArg("--PerQuery=", "5")), Config.Data.EmbeddingDim);
-console.log(`ingested ${Stats.Ingested} -> Filtered=${Stats.ByTier.Filtered} Raw=${Stats.ByTier.Raw} Rejected=${Stats.ByTier.Rejected}\n`);
+console.log(`\ningested ${Stats.Ingested} files -> Filtered=${Stats.ByTier.Filtered} Raw=${Stats.ByTier.Raw} Rejected=${Stats.ByTier.Rejected}\n`);
 console.log(RenderReportText(BuildReport(await Store.All())));

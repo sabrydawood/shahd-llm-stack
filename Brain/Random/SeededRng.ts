@@ -18,6 +18,16 @@ export class SeededRng {
     this.State = Seed >>> 0;
   }
 
+  /** Snapshot the internal state (for checkpoint save). */
+  GetState(): number {
+    return this.State;
+  }
+
+  /** Restore a snapshotted state (for reproducible resume). */
+  SetState(State: number): void {
+    this.State = State >>> 0;
+  }
+
   /** Next 32-bit unsigned integer. */
   NextUint32(): number {
     this.State = (Math.imul(this.State, 1664525) + 1013904223) >>> 0;

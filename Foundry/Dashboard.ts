@@ -1,94 +1,113 @@
-// Visual inspection dashboard for the Data Foundry (M4). A Bun-served page + JSON API over any
-// DocumentStore (in-memory now, Postgres later) so data quality can be watched and cleaned: tier
-// counts, the training-eligible byte total, a quality histogram, license/language breakdowns, and a
-// browsable document list (with reject reasons) filtered by tier. Read-only — it never mutates data.
+// Interactive Foundry control panel (M9). A Bun-served page + API over a DocumentStore:
+//   GET  /                  the control-panel page
+//   GET  /api/stats         aggregate counts (tiers/langs/licenses/bytes)
+//   GET  /api/repos         per-repo rollup (accordion list)
+//   GET  /api/documents     ?source=… files of one repo (accordion contents)
+//   GET  /api/config        whether a Learn runner is wired
+//   POST /api/learn         start a Learn run with the posted settings (one at a time)
+//   GET  /api/learn/stream  Server-Sent Events streaming the run's progress
+// The Learn runner is INJECTED (a mock in tests; the real provider-backed one at serving time), so
+// the handler is testable and never imports the network/fs providers itself.
 
 import type { DocumentStore } from "./DocumentStore.ts";
-import { BuildReport } from "./QualityReport.ts";
+import type { LearnSettings, LearnEvent, LearnFn } from "./DashboardTypes.ts";
+import type { RepoLevel } from "./RepoQuality.ts";
+import { DashboardHtml } from "./DashboardHtml.ts";
 
 export type DashboardHandler = (Req: Request) => Promise<Response>;
 
-const Html = `<!doctype html><html><head><meta charset="utf-8"><title>Shahd Data Foundry</title>
-<style>
- body{font:14px system-ui,sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
- header{padding:16px 24px;background:#161a22;border-bottom:1px solid #262b36}
- h1{margin:0;font-size:18px} main{padding:24px;max-width:1100px;margin:0 auto}
- .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
- .card{background:#161a22;border:1px solid #262b36;border-radius:8px;padding:14px 18px;min-width:120px}
- .card b{display:block;font-size:22px} .muted{color:#8b93a1;font-size:12px}
- .bars{display:flex;gap:3px;align-items:flex-end;height:70px}
- .bar{flex:1;background:#3b82f6;min-height:2px;border-radius:2px 2px 0 0}
- table{width:100%;border-collapse:collapse;margin-top:8px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #262b36;vertical-align:top}
- select{background:#161a22;color:#e6e6e6;border:1px solid #262b36;border-radius:6px;padding:6px}
- pre{margin:0;white-space:pre-wrap;color:#a5b4c4;font-size:12px;max-height:120px;overflow:auto}
- .tier-Filtered{color:#22c55e} .tier-Rejected{color:#ef4444} .tier-Raw{color:#eab308}
- h2{font-size:14px;color:#8b93a1;text-transform:uppercase;letter-spacing:.05em;margin:24px 0 4px}
-</style></head><body>
-<header><h1>Shahd — Data Foundry</h1><span class="muted">tiered, inspectable training data</span></header>
-<main>
- <div class="cards" id="cards"></div>
- <h2>Quality histogram (0.0 → 1.0)</h2><div class="bars" id="hist"></div>
- <h2>By license</h2><div id="licenses"></div>
- <h2>By language</h2><div id="langs"></div>
- <h2>Documents</h2>
- <select id="tier" onchange="loadDocs()"><option value="">all tiers</option><option>Filtered</option><option>Raw</option><option>Rejected</option></select>
- <table><thead><tr><th>tier</th><th>license</th><th>lang</th><th>quality</th><th>provenance / reject reason</th><th>preview</th></tr></thead><tbody id="docs"></tbody></table>
-</main>
-<script>
- const H=(s)=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
- async function loadReport(){
-  const r=await (await fetch('/api/report')).json();
-  document.getElementById('cards').innerHTML=
-   '<div class="card"><b>'+r.Total+'</b><span class="muted">documents</span></div>'+
-   '<div class="card"><b class="tier-Filtered">'+r.ByTier.Filtered+'</b><span class="muted">filtered</span></div>'+
-   '<div class="card"><b class="tier-Raw">'+r.ByTier.Raw+'</b><span class="muted">raw</span></div>'+
-   '<div class="card"><b class="tier-Rejected">'+r.ByTier.Rejected+'</b><span class="muted">rejected</span></div>'+
-   '<div class="card"><b>'+r.FilteredBytes+'</b><span class="muted">trainable bytes</span></div>';
-  const m=Math.max(1,...r.QualityHistogram);
-  document.getElementById('hist').innerHTML=r.QualityHistogram.map(v=>'<div class="bar" style="height:'+(v/m*100)+'%" title="'+v+'"></div>').join('');
-  const kv=(o)=>Object.entries(o).map(([k,v])=>H(k)+': '+v).join(' &nbsp; ');
-  document.getElementById('licenses').innerHTML=kv(r.ByLicense);
-  document.getElementById('langs').innerHTML=kv(r.ByLang);
- }
- async function loadDocs(){
-  const t=document.getElementById('tier').value;
-  const d=await (await fetch('/api/documents?limit=200'+(t?'&tier='+t:''))).json();
-  document.getElementById('docs').innerHTML=d.map(x=>'<tr><td class="tier-'+x.tier+'">'+x.tier+'</td><td>'+H(x.license)+'</td><td>'+H(x.lang)+'</td><td>'+x.quality.toFixed(2)+'</td><td>'+H(x.provenance)+(x.rejectReason?'<br><span class="muted">'+H(x.rejectReason)+'</span>':'')+'</td><td><pre>'+H(x.preview)+'</pre></td></tr>').join('');
- }
- loadReport();loadDocs();
-</script></body></html>`;
+type JobState = { Running: boolean; Events: LearnEvent[]; Listeners: Set<(Event: LearnEvent) => void> };
 
-export function CreateDashboardHandler(Store: DocumentStore): DashboardHandler {
+function ToNum(Value: unknown, Default: number): number {
+  if (Value === null || Value === undefined || Value === "") return Default; // Number(null) is 0, not the default
+  const N = Number(Value);
+  return Number.isFinite(N) ? N : Default;
+}
+
+function ParseSettings(Body: Record<string, unknown>): LearnSettings {
+  const Source = Body["Source"];
+  const Level = Body["MinLevel"];
+  const Repos = Body["Repos"];
+  return {
+    Source: Source === "local" || Source === "both" ? Source : "github",
+    Query: typeof Body["Query"] === "string" ? Body["Query"] : "language:typescript stars:>1000",
+    Repos: Array.isArray(Repos) ? Repos.map(String) : ["."],
+    MinLevel: (Level === "high" || Level === "low" ? Level : "medium") as RepoLevel,
+    MaxRepos: ToNum(Body["MaxRepos"], 5),
+    MaxFilesPerRepo: ToNum(Body["MaxFilesPerRepo"], 2000),
+    MaxBytesPerRepo: ToNum(Body["MaxBytesPerRepo"], 32_000_000),
+    SkipLearned: Body["SkipLearned"] !== false,
+  };
+}
+
+function Json(Data: unknown, Status = 200): Response {
+  return Response.json(Data, { status: Status });
+}
+
+export function CreateDashboardHandler(Store: DocumentStore, Learn?: LearnFn): DashboardHandler {
+  const Job: JobState = { Running: false, Events: [], Listeners: new Set() };
+  const Emit = (Event: LearnEvent): void => {
+    Job.Events.push(Event);
+    for (const Listener of Job.Listeners) Listener(Event);
+    if (Event.kind === "done" || Event.kind === "error") Job.Running = false;
+  };
+
   return async (Req: Request): Promise<Response> => {
     const Url = new URL(Req.url);
-    if (Url.pathname === "/" || Url.pathname === "/index.html") {
-      return new Response(Html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    const Path = Url.pathname;
+
+    if (Path === "/" || Path === "/index.html") {
+      return new Response(DashboardHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
-    if (Url.pathname === "/api/report") {
-      return Response.json(BuildReport(await Store.All()));
+    if (Path === "/api/stats") return Json(await Store.Stats());
+    if (Path === "/api/repos") return Json(await Store.RepoSummaries());
+    if (Path === "/api/config") return Json({ learnEnabled: Learn !== undefined, running: Job.Running });
+    if (Path === "/api/documents") {
+      const Source = Url.searchParams.get("source") ?? "";
+      const Limit = ToNum(Url.searchParams.get("limit"), 500);
+      const Docs = await Store.DocumentsBySource(Source, Limit);
+      return Json(Docs.map((D) => ({ path: D.Provenance.split("/").slice(-3).join("/"), tier: D.Tier, lang: D.Lang, bytes: D.Bytes, provenance: D.Provenance })));
     }
-    if (Url.pathname === "/api/documents") {
-      const Tier = Url.searchParams.get("tier");
-      const Limit = Number(Url.searchParams.get("limit") ?? 100);
-      let Docs = await Store.All();
-      if (Tier !== null && Tier !== "") Docs = Docs.filter((D) => D.Tier === Tier);
-      return Response.json(
-        Docs.slice(0, Number.isFinite(Limit) ? Limit : 100).map((D) => ({
-          id: D.Id,
-          tier: D.Tier,
-          license: D.License,
-          lang: D.Lang,
-          quality: D.QualityScore,
-          provenance: D.Provenance,
-          rejectReason: D.RejectReason,
-          preview: D.Content.slice(0, 400),
-        })),
-      );
+
+    if (Path === "/api/learn" && Req.method === "POST") {
+      if (Learn === undefined) return Json({ error: "read-only dashboard (no learn runner wired)" }, 501);
+      if (Job.Running) return Json({ error: "a learn run is already in progress" }, 409);
+      const Body = (await Req.json().catch(() => ({}))) as Record<string, unknown>;
+      const Settings = ParseSettings(Body);
+      Job.Running = true;
+      Job.Events = [];
+      Emit({ kind: "start", query: Settings.Query, source: Settings.Source });
+      void Learn(Settings, Emit).catch((Caught) => Emit({ kind: "error", message: (Caught as Error).message }));
+      return Json({ started: true }, 202);
     }
+
+    if (Path === "/api/learn/stream") {
+      const Stream = new ReadableStream<Uint8Array>({
+        start: (Controller: ReadableStreamDefaultController<Uint8Array>): void => {
+          const Encoder = new TextEncoder();
+          const Send = (Event: LearnEvent): void => Controller.enqueue(Encoder.encode(`data: ${JSON.stringify(Event)}\n\n`));
+          for (const Event of Job.Events) Send(Event);
+          if (!Job.Running) {
+            Controller.close();
+            return;
+          }
+          const Listener = (Event: LearnEvent): void => {
+            Send(Event);
+            if (Event.kind === "done" || Event.kind === "error") {
+              Job.Listeners.delete(Listener);
+              Controller.close();
+            }
+          };
+          Job.Listeners.add(Listener);
+        },
+      });
+      return new Response(Stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
+    }
+
     return new Response("not found", { status: 404 });
   };
 }
 
-export function StartDashboard(Store: DocumentStore, Port = 8090): ReturnType<typeof Bun.serve> {
-  return Bun.serve({ port: Port, fetch: CreateDashboardHandler(Store) });
+export function StartDashboard(Store: DocumentStore, Port = 8090, Learn?: LearnFn): ReturnType<typeof Bun.serve> {
+  return Bun.serve({ port: Port, fetch: CreateDashboardHandler(Store, Learn) });
 }

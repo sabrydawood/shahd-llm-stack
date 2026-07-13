@@ -3,7 +3,7 @@
 // live database. Dedup is by Id (content hash); FindSimilar is a linear cosine scan (fine at this
 // scale — pgvector handles scale in the Postgres implementation).
 
-import type { DocumentStore, SimilarHit } from "./DocumentStore.ts";
+import type { DocumentStore, SimilarHit, RepoSummary, FoundryStats } from "./DocumentStore.ts";
 import type { DocumentRecord, Tier } from "./DocumentRecord.ts";
 import { CosineSimilarity } from "./Embedding.ts";
 
@@ -31,5 +31,38 @@ export class InMemoryDocumentStore implements DocumentStore {
 
   async Count(): Promise<number> {
     return this.Docs.size;
+  }
+
+  async Sources(): Promise<string[]> {
+    return [...new Set([...this.Docs.values()].map((D) => D.Source))];
+  }
+
+  async RepoSummaries(): Promise<RepoSummary[]> {
+    const By = new Map<string, RepoSummary>();
+    for (const Doc of this.Docs.values()) {
+      const Entry = By.get(Doc.Source) ?? { Source: Doc.Source, Files: 0, Bytes: 0 };
+      Entry.Files++;
+      Entry.Bytes += Doc.Bytes;
+      By.set(Doc.Source, Entry);
+    }
+    return [...By.values()].sort((A, B) => B.Files - A.Files);
+  }
+
+  async DocumentsBySource(Source: string, Limit: number): Promise<DocumentRecord[]> {
+    return [...this.Docs.values()].filter((D) => D.Source === Source).slice(0, Limit);
+  }
+
+  async Stats(): Promise<FoundryStats> {
+    const ByTier: Record<Tier, number> = { Filtered: 0, Raw: 0, Rejected: 0 };
+    const ByLang: Record<string, number> = {};
+    const ByLicense: Record<string, number> = {};
+    let FilteredBytes = 0;
+    for (const Doc of this.Docs.values()) {
+      ByTier[Doc.Tier]++;
+      ByLang[Doc.Lang] = (ByLang[Doc.Lang] ?? 0) + 1;
+      ByLicense[Doc.License] = (ByLicense[Doc.License] ?? 0) + 1;
+      if (Doc.Tier === "Filtered") FilteredBytes += Doc.Bytes;
+    }
+    return { Total: this.Docs.size, ByTier, ByLang, ByLicense, FilteredBytes };
   }
 }

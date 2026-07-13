@@ -6,10 +6,10 @@
 
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import { Documents } from "./FoundrySchema.ts";
 import type { DocumentRow, DocumentInsert } from "./FoundrySchema.ts";
-import type { DocumentStore, SimilarHit } from "./DocumentStore.ts";
+import type { DocumentStore, SimilarHit, RepoSummary, FoundryStats } from "./DocumentStore.ts";
 import type { DocumentRecord, Tier } from "./DocumentRecord.ts";
 import { CosineSimilarity } from "./Embedding.ts";
 
@@ -85,6 +85,40 @@ export class PostgresDocumentStore implements DocumentStore {
   async Count(): Promise<number> {
     const Result = await this.Db.select({ Count: sql<number>`count(*)::int` }).from(Documents);
     return Number(Result[0]?.Count ?? 0);
+  }
+
+  async Sources(): Promise<string[]> {
+    return (await this.Db.selectDistinct({ Source: Documents.source }).from(Documents)).map((R) => R.Source);
+  }
+
+  async RepoSummaries(): Promise<RepoSummary[]> {
+    const Rows = await this.Db
+      .select({ Source: Documents.source, Files: sql<number>`count(*)::int`, Bytes: sql<number>`coalesce(sum(bytes),0)::bigint` })
+      .from(Documents)
+      .groupBy(Documents.source)
+      .orderBy(desc(sql`count(*)`));
+    return Rows.map((R) => ({ Source: R.Source, Files: Number(R.Files), Bytes: Number(R.Bytes) }));
+  }
+
+  async DocumentsBySource(Source: string, Limit: number): Promise<DocumentRecord[]> {
+    return (await this.Db.select().from(Documents).where(eq(Documents.source, Source)).limit(Limit)).map(FromRow);
+  }
+
+  async Stats(): Promise<FoundryStats> {
+    const CountExpr = sql<number>`count(*)::int`;
+    const Tiers = await this.Db.select({ Key: Documents.tier, Count: CountExpr }).from(Documents).groupBy(Documents.tier);
+    const Langs = await this.Db.select({ Key: Documents.lang, Count: CountExpr }).from(Documents).groupBy(Documents.lang);
+    const Licenses = await this.Db.select({ Key: Documents.license, Count: CountExpr }).from(Documents).groupBy(Documents.license);
+    const Filtered = await this.Db.select({ Bytes: sql<number>`coalesce(sum(bytes),0)::bigint` }).from(Documents).where(eq(Documents.tier, "Filtered"));
+
+    const ByTier: Record<Tier, number> = { Filtered: 0, Raw: 0, Rejected: 0 };
+    for (const Row of Tiers) if (Row.Key in ByTier) ByTier[Row.Key as Tier] = Number(Row.Count);
+    const ByLang: Record<string, number> = {};
+    for (const Row of Langs) ByLang[Row.Key] = Number(Row.Count);
+    const ByLicense: Record<string, number> = {};
+    for (const Row of Licenses) ByLicense[Row.Key] = Number(Row.Count);
+    const Total = ByTier.Filtered + ByTier.Raw + ByTier.Rejected;
+    return { Total, ByTier, ByLang, ByLicense, FilteredBytes: Number(Filtered[0]?.Bytes ?? 0) };
   }
 
   async Close(): Promise<void> {

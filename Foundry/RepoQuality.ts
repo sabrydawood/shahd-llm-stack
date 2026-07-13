@@ -19,7 +19,10 @@ export type RepoAssessment = {
 };
 
 /** Per-repo reporting hook payload (shared by the GitHub + local repo providers). */
-export type RepoIngestInfo = { Repo: string; License: string; Assessment: RepoAssessment; Ingested: boolean };
+export type RepoIngestInfo = { Repo: string; License: string; Assessment: RepoAssessment; Ingested: boolean; Reason?: string };
+
+/** A placeholder assessment for repos skipped before they are fetched (e.g. already learned). */
+export const EmptyAssessment: RepoAssessment = { FileCount: 0, TotalBytes: 0, AvgQuality: 0, HasStructure: false, Level: "low" };
 
 const StructureDir = /(^|\/)(src|lib|source|app|packages|internal|pkg|core)\//i;
 

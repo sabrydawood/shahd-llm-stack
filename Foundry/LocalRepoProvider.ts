@@ -10,7 +10,7 @@ import type { WebProvider } from "./WebSource.ts";
 import type { SourceInput } from "./Ingest.ts";
 import type { RepoFile } from "./RepoArchive.ts";
 import { DefaultRepoLimits } from "./RepoArchive.ts";
-import { AssessRepo, LevelRank } from "./RepoQuality.ts";
+import { AssessRepo, LevelRank, EmptyAssessment } from "./RepoQuality.ts";
 import type { RepoLevel, RepoIngestInfo } from "./RepoQuality.ts";
 import { IsSubstantiveCodePath, IsSubstantiveCodeContent, LangForPath } from "./CodeFileFilter.ts";
 
@@ -56,6 +56,7 @@ export type LocalRepoOptions = {
   MinLevel?: RepoLevel;
   MaxFiles?: number;
   MaxBytes?: number;
+  SkipRepo?: (Repo: string) => boolean;
   OnRepo?: (Info: RepoIngestInfo) => void;
 };
 
@@ -69,14 +70,19 @@ export function CreateLocalRepoProvider(Options: LocalRepoOptions): WebProvider 
     Fetch: async (): Promise<SourceInput[]> => {
       const Out: SourceInput[] = [];
       for (const Root of Options.Roots) {
+        const Name = basename(Root);
+        if (Options.SkipRepo?.(Name) === true) {
+          Options.OnRepo?.({ Repo: Name, License, Assessment: EmptyAssessment, Ingested: false, Reason: "already learned" });
+          continue;
+        }
         const Files = WalkRepo(Root, MaxFiles, MaxBytes);
         const Assessment = AssessRepo(Files);
         const Ingested = LevelRank[Assessment.Level] >= LevelRank[MinLevel];
-        Options.OnRepo?.({ Repo: basename(Root), License, Assessment, Ingested });
+        Options.OnRepo?.({ Repo: Name, License, Assessment, Ingested });
         if (!Ingested) continue;
         for (const File of Files) {
           Out.push({
-            Source: basename(Root),
+            Source: Name,
             License,
             Lang: LangForPath(File.Path),
             Content: File.Content,

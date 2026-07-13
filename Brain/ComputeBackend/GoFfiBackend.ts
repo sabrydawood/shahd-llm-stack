@@ -3,10 +3,11 @@
 // subprocess GoBackend it IS a drop-in sync ComputeBackend. Requires GoKernels/matmul.dll (built
 // from GoKernels/ffi via `go build -buildmode=c-shared`, done in PowerShell where MinGW gcc works).
 //
-// SPIKE FINDING: this proves the owned-Go FFI path works and is numerically exact, but a NAIVE Go
-// matmul does NOT beat Bun's JIT-compiled TS matmul (~0.67x). The path only pays off with
-// optimized kernels (cache tiling / SIMD / goroutine parallelism), not a straight port — so
-// TsBackend stays the default until an optimized kernel exists.
+// FINDING (Phase 7, updated): a NAIVE Go port lost to Bun's JIT (~0.67x), but the OPTIMIZED kernel
+// (B-transpose for cache locality + goroutine row-parallelism, see GoKernels/ffi/matmul.go) now
+// WINS decisively and bit-exactly — measured ~2.0x at 128, ~6.7x at 256, ~7.8x at 512 (parity
+// 0.0e+0). It stays an OPT-IN accelerator, not the default: it needs the prebuilt DLL (gcc, built
+// via PowerShell), so TsBackend remains the zero-dependency fallback the hot path can always use.
 
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import type { Pointer } from "bun:ffi";

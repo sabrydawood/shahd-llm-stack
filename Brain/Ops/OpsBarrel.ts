@@ -12,3 +12,8 @@ export { SoftmaxRows } from "./SoftmaxRows.ts";
 export { LayerNorm } from "./LayerNorm.ts";
 export { EmbeddingLookup } from "./EmbeddingLookup.ts";
 export { CrossEntropy } from "./CrossEntropy.ts";
+export { ApplyRope } from "./RotaryEmbedding.ts";
+export { RmsNorm } from "./RmsNorm.ts";
+export { Gelu } from "./Gelu.ts";
+export { Silu } from "./Silu.ts";
+export { Mul } from "./Mul.ts";

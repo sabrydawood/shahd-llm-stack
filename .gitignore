@@ -41,6 +41,7 @@ hello.c
 *.exe
 
 App/nano-gpt.ts
+App/note.txt
 
 # Local-only working notes — never tracked
 Plan/

@@ -1,0 +1,41 @@
+{
+  "Model": {
+    "EmbedDim": 384,
+    "NumLayers": 6,
+    "NumHeads": 6,
+    "BlockSize": 256,
+    "VocabSize": 8192,
+    "MlpRatio": 4,
+    "LayerNormEps": 1e-5,
+    "Dropout": 0.1,
+    "WeightTying": true,
+    "InitScale": 0.02,
+    "UseScaledResidualInit": true
+  },
+  "Optimizer": {
+    "Kind": "AdamW",
+    "LearningRate": 3e-4,
+    "Beta1": 0.9,
+    "Beta2": 0.95,
+    "Epsilon": 1e-8,
+    "WeightDecay": 0.1,
+    "GradClipNorm": 1
+  },
+  "Schedule": {
+    "Kind": "Cosine",
+    "WarmupSteps": 500,
+    "MaxSteps": 20000,
+    "MinLrRatio": 0.1
+  },
+  "Training": {
+    "BatchSize": 32,
+    "Seed": 1,
+    "EvalInterval": 500,
+    "EvalIterations": 100,
+    "CheckpointInterval": 2000
+  },
+  "Tokenizer": {
+    "Kind": "Bpe",
+    "MergesPath": "Corpus/merges.json"
+  }
+}

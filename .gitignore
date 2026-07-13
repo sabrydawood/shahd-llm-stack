@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+bun.lockb
+
+# Build / output
+dist/
+build/
+*.tsbuildinfo
+
+# Runtime artifacts (trained weights, logs, checkpoints, corpora)
+Checkpoints/
+Runs/
+Corpus/
+*.log
+*.ckpt
+*.safetensors
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# Go build artifacts (Phase 2)
+GoKernels/*.dll
+GoKernels/*.so
+GoKernels/*.dylib
+GoKernels/*.h
+
+Plan/ARCHITECTURE.md
+Plan/CAPABILITIES.md
+Plan/CONVENTIONS.md
+Plan/PHASE1.md
+Plan/REVIEW.md
+Plan/SPEC.md
+App/nano-gpt.ts

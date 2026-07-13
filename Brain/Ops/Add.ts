@@ -1,0 +1,22 @@
+// Elementwise add of two same-shape tensors. Backward: both parents receive dOut unchanged.
+
+import { Tensor } from "../Tensor/Tensor.ts";
+import { Tape } from "../Tensor/Tape.ts";
+
+export function Add(A: Tensor, B: Tensor): Tensor {
+  if (A.Rows !== B.Rows || A.Cols !== B.Cols) {
+    throw new Error(`Add: shape mismatch ${A.Rows}x${A.Cols} vs ${B.Rows}x${B.Cols}`);
+  }
+  const Out = new Tensor(A.Rows, A.Cols, undefined, [A, B]);
+  for (let I = 0; I < A.Size; I++) Out.Data[I] = A.Data[I] + B.Data[I];
+
+  if (Tape.On) {
+    Out.BackwardFn = () => {
+      for (let I = 0; I < A.Size; I++) {
+        A.Grad[I] += Out.Grad[I];
+        B.Grad[I] += Out.Grad[I];
+      }
+    };
+  }
+  return Out;
+}

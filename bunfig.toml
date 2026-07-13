@@ -1,0 +1,5 @@
+# Bun is the primary runtime (ADR-0003). Test files use the PascalCase *.Test.ts convention;
+# Bun's test runner discovers *.test.* by default, so tests are named *.Test.ts and this
+# root is passed explicitly in the "test" script. See CONVENTIONS.md.
+[test]
+root = "."

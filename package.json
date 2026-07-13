@@ -1,0 +1,33 @@
+{
+  "name": "shahd",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shahd (شهد) — a from-scratch, fully-owned, code-specialized language model brain (TypeScript + Go kernels).",
+  "module": "Brain/Nn/Shahd.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "lint": "eslint .",
+    "gradcheck": "bun run Scripts/RunGradCheck.ts",
+    "train": "bun run Scripts/Train.ts",
+    "sample": "bun run Scripts/Sample.ts",
+    "train:bpe": "bun run Scripts/TrainBpeMerges.ts",
+    "check:length": "bun run Tools/CheckFileLength.ts",
+    "check:naming": "bun run Tools/CheckNamingConvention.ts",
+    "ci": "bun run typecheck && bun run check:length && bun run check:naming && bun run lint && bun run gradcheck && bun test"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.17.0",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import": "^2.31.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0"
+  }
+}

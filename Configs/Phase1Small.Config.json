@@ -1,0 +1,40 @@
+{
+  "Model": {
+    "EmbedDim": 128,
+    "NumLayers": 4,
+    "NumHeads": 4,
+    "BlockSize": 128,
+    "VocabSize": 256,
+    "MlpRatio": 4,
+    "LayerNormEps": 1e-5,
+    "Dropout": 0,
+    "WeightTying": true,
+    "InitScale": 0.02,
+    "UseScaledResidualInit": true
+  },
+  "Optimizer": {
+    "Kind": "AdamW",
+    "LearningRate": 3e-4,
+    "Beta1": 0.9,
+    "Beta2": 0.999,
+    "Epsilon": 1e-8,
+    "WeightDecay": 0.01,
+    "GradClipNorm": 1
+  },
+  "Schedule": {
+    "Kind": "Cosine",
+    "WarmupSteps": 100,
+    "MaxSteps": 3000,
+    "MinLrRatio": 0.1
+  },
+  "Training": {
+    "BatchSize": 16,
+    "Seed": 1,
+    "EvalInterval": 250,
+    "EvalIterations": 50,
+    "CheckpointInterval": 1000
+  },
+  "Tokenizer": {
+    "Kind": "Char"
+  }
+}

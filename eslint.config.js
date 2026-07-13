@@ -27,7 +27,9 @@ export default tseslint.config(
         "error",
         { selector: "default", format: ["PascalCase"], leadingUnderscore: "allow" },
         { selector: "import", format: null },
-        { selector: ["objectLiteralProperty", "typeProperty"], format: null },
+        // Object-literal keys/methods and type properties often carry externally-mandated names
+        // (Web APIs like ReadableStream.start, JSON config keys, zod shapes) — exempt them.
+        { selector: ["objectLiteralProperty", "typeProperty", "objectLiteralMethod"], format: null },
         { selector: "typeLike", format: ["PascalCase"] },
         { selector: "enumMember", format: ["PascalCase"] },
       ],

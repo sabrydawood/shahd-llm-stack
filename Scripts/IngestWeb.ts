@@ -6,9 +6,9 @@
 //   GITHUB_TOKEN=... BRAVE_API_KEY=... bun run Scripts/IngestWeb.ts --Query="language:typescript license:mit stars:>100" --Store=postgres
 
 import { LoadConfig } from "../Brain/Config/LoadConfig.ts";
-import { InMemoryDocumentStore, IngestFromWeb, CreateGitHubProvider, CreateWebSearchProvider, BuildReport, RenderReportText } from "../Brain/Foundry/FoundryBarrel.ts";
-import type { WebProvider, SearchBackend, DocumentStore } from "../Brain/Foundry/FoundryBarrel.ts";
-import { PostgresDocumentStore } from "../Brain/Foundry/PostgresDocumentStore.ts";
+import { InMemoryDocumentStore, IngestFromWeb, CreateGitHubProvider, CreateWebSearchProvider, BuildReport, RenderReportText } from "../Foundry/FoundryBarrel.ts";
+import type { WebProvider, SearchBackend, DocumentStore } from "../Foundry/FoundryBarrel.ts";
+import { PostgresDocumentStore } from "../Foundry/PostgresDocumentStore.ts";
 import { ReadArg } from "./ScriptArgs.ts";
 
 // Brave Search backend (used only if BRAVE_API_KEY is set); swap for any search API by shape.

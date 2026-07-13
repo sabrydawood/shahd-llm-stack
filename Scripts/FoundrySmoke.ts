@@ -3,9 +3,9 @@
 // Ingests the seed corpus into Postgres, prints the quality report, and runs a similarity query.
 
 import { readFileSync, existsSync } from "node:fs";
-import { IngestDocuments, BuildReport, RenderReportText, HashingEmbedding } from "../Brain/Foundry/FoundryBarrel.ts";
-import type { SourceInput } from "../Brain/Foundry/FoundryBarrel.ts";
-import { PostgresDocumentStore } from "../Brain/Foundry/PostgresDocumentStore.ts";
+import { IngestDocuments, BuildReport, RenderReportText, HashingEmbedding } from "../Foundry/FoundryBarrel.ts";
+import type { SourceInput } from "../Foundry/FoundryBarrel.ts";
+import { PostgresDocumentStore } from "../Foundry/PostgresDocumentStore.ts";
 
 type ManifestEntry = { Source: string; License: string; Path: string; Lang?: string };
 

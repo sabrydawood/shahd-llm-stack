@@ -8,8 +8,8 @@ import {
   ExportTrainingText,
   BuildReport,
   RenderReportText,
-} from "../Brain/Foundry/FoundryBarrel.ts";
-import type { SourceInput } from "../Brain/Foundry/FoundryBarrel.ts";
+} from "../Foundry/FoundryBarrel.ts";
+import type { SourceInput } from "../Foundry/FoundryBarrel.ts";
 
 const Clean = "export function add(a, b) {\n  return a + b;\n}\n";
 const GoSnippet = "package main\n\nfunc Max(a, b int) int {\n\tif a > b {\n\t\treturn a\n\t}\n\treturn b\n}\n";

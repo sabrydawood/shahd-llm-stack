@@ -2,9 +2,9 @@
 //   bun run Scripts/StartDashboard.ts   (then open http://localhost:8090)
 
 import { readFileSync, existsSync } from "node:fs";
-import { InMemoryDocumentStore, IngestDocuments, StartDashboard } from "../Brain/Foundry/FoundryBarrel.ts";
-import type { DocumentStore, SourceInput } from "../Brain/Foundry/FoundryBarrel.ts";
-import { PostgresDocumentStore } from "../Brain/Foundry/PostgresDocumentStore.ts";
+import { InMemoryDocumentStore, IngestDocuments, StartDashboard } from "../Foundry/FoundryBarrel.ts";
+import type { DocumentStore, SourceInput } from "../Foundry/FoundryBarrel.ts";
+import { PostgresDocumentStore } from "../Foundry/PostgresDocumentStore.ts";
 import { ReadArg } from "./ScriptArgs.ts";
 
 type ManifestEntry = { Source: string; License: string; Path: string; Lang?: string };

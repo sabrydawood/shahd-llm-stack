@@ -5,8 +5,8 @@
 //   low quality  -> Rejected (with the quality reasons).
 //   otherwise    -> Filtered (permissive + clean, eligible for training).
 
-import { IsPermissive } from "../Data/LicenseManifest.ts";
-import { ScoreCodeQuality } from "../Data/QualityFilter.ts";
+import { IsPermissive } from "../Brain/Data/LicenseManifest.ts";
+import { ScoreCodeQuality } from "../Brain/Data/QualityFilter.ts";
 import type { Tier, Origin } from "./DocumentRecord.ts";
 
 export type TierDecision = { Tier: Tier; QualityScore: number; RejectReason: string | null };

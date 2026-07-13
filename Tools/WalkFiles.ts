@@ -5,7 +5,7 @@ import { readdirSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
 
 /** The source roots the CI gates police. */
-export const SourceRoots: readonly string[] = ["Brain", "Scripts", "Tools", "Tests"];
+export const SourceRoots: readonly string[] = ["Brain", "Foundry", "Scripts", "Tools", "Tests"];
 
 /** Recursively collect every `.ts` file under `Dir`. Returns [] if `Dir` is absent. */
 export function WalkTsFiles(Dir: string): string[] {

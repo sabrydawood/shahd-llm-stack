@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
-import { InMemoryDocumentStore, IngestDocuments } from "../Brain/Foundry/FoundryBarrel.ts";
-import { CreateDashboardHandler } from "../Brain/Foundry/Dashboard.ts";
-import type { SourceInput } from "../Brain/Foundry/FoundryBarrel.ts";
+import { InMemoryDocumentStore, IngestDocuments } from "../Foundry/FoundryBarrel.ts";
+import { CreateDashboardHandler } from "../Foundry/Dashboard.ts";
+import type { SourceInput } from "../Foundry/FoundryBarrel.ts";
 
 async function SeededHandler() {
   const Store = new InMemoryDocumentStore();

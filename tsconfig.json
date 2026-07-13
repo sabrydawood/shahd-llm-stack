@@ -27,6 +27,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["Brain", "Scripts", "Tools", "Tests"],
+  "include": ["Brain", "Foundry", "Scripts", "Tools", "Tests"],
   "exclude": ["node_modules", "App"]
 }

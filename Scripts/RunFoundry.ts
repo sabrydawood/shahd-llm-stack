@@ -4,8 +4,8 @@
 //   bun run Scripts/RunFoundry.ts
 
 import { readFileSync, existsSync } from "node:fs";
-import { InMemoryDocumentStore, IngestDocuments, ExportTrainingText, BuildReport, RenderReportText } from "../Brain/Foundry/FoundryBarrel.ts";
-import type { SourceInput } from "../Brain/Foundry/FoundryBarrel.ts";
+import { InMemoryDocumentStore, IngestDocuments, ExportTrainingText, BuildReport, RenderReportText } from "../Foundry/FoundryBarrel.ts";
+import type { SourceInput } from "../Foundry/FoundryBarrel.ts";
 
 type ManifestEntry = { Source: string; License: string; Path: string; Lang?: string };
 

@@ -5,8 +5,8 @@ import {
   CreateGitHubProvider,
   CreateWebSearchProvider,
   HtmlToText,
-} from "../Brain/Foundry/FoundryBarrel.ts";
-import type { HttpJson, SearchBackend, PageFetch } from "../Brain/Foundry/FoundryBarrel.ts";
+} from "../Foundry/FoundryBarrel.ts";
+import type { HttpJson, SearchBackend, PageFetch } from "../Foundry/FoundryBarrel.ts";
 
 // Mock GitHub HTTP: one MIT repo, one code file (base64), so no real network is used.
 const MockHttp: HttpJson = async (Url) => {

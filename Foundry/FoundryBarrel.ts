@@ -3,6 +3,8 @@
 export type { DocumentRecord, Tier, Origin } from "./DocumentRecord.ts";
 export { ClassifyDocument } from "./Tiering.ts";
 export type { TierDecision } from "./Tiering.ts";
+export { DetectSpdx, NormalizeLicense } from "./SpdxDetector.ts";
+export type { SpdxResult } from "./SpdxDetector.ts";
 export { HashingEmbedding, CosineSimilarity } from "./Embedding.ts";
 export type { DocumentStore, SimilarHit, RepoSummary, FoundryStats } from "./DocumentStore.ts";
 export { InMemoryDocumentStore } from "./InMemoryDocumentStore.ts";

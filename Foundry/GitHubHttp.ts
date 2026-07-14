@@ -26,3 +26,16 @@ export function DefaultGitHubBytes(Token?: string): FetchBytes {
     return new Uint8Array(await Response.arrayBuffer());
   };
 }
+
+// Fetch a repo's LICENSE file (raw text) via GET /repos/{owner}/{repo}/license. Returns the SPDX id
+// GitHub's own matcher assigned (often "NOASSERTION" — GitHub can't classify a deviant file) plus the
+// decoded license text, which is what a stricter local matcher (SpdxDetector) then classifies. Null
+// when the repo has no license file (404) or on any API error — the caller treats that as unresolved.
+export type RepoLicense = { Spdx: string; Text: string };
+export async function FetchRepoLicense(FullName: string, Token?: string): Promise<RepoLicense | null> {
+  const Response = await fetch(`https://api.github.com/repos/${FullName}/license`, { headers: AuthHeaders(Token, "application/vnd.github+json") });
+  if (!Response.ok) return null;
+  const Body = (await Response.json()) as { license?: { spdx_id?: string }; content?: string; encoding?: string };
+  const Text = Body.content !== undefined && Body.encoding === "base64" ? Buffer.from(Body.content, "base64").toString("utf8") : "";
+  return { Spdx: Body.license?.spdx_id ?? "NOASSERTION", Text };
+}

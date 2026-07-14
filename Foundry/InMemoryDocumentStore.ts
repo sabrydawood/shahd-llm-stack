@@ -56,6 +56,24 @@ export class InMemoryDocumentStore implements DocumentStore {
     return this.Docs.get(Id) ?? null;
   }
 
+  async ReclassifyBySource(Source: string, NewLicense: string, MinQuality: number): Promise<{ Promoted: number; KeptLowQuality: number }> {
+    let Promoted = 0;
+    let KeptLowQuality = 0;
+    for (const Doc of this.Docs.values()) {
+      if (Doc.Source !== Source || Doc.License !== "NOASSERTION") continue;
+      Doc.License = NewLicense;
+      if (Doc.QualityScore >= MinQuality) {
+        Doc.Tier = "Filtered";
+        Doc.RejectReason = null;
+        Promoted++;
+      } else {
+        Doc.RejectReason = `low quality (score < ${MinQuality})`;
+        KeptLowQuality++;
+      }
+    }
+    return { Promoted, KeptLowQuality };
+  }
+
   async Stats(): Promise<FoundryStats> {
     const ByTier: Record<Tier, number> = { Filtered: 0, Raw: 0, Rejected: 0 };
     const ByLang: Record<string, number> = {};

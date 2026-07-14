@@ -101,6 +101,31 @@ test("ingest is resilient: one failing Upsert doesn't abort the batch", async ()
   expect(await Store.Count()).toBe(2);
 });
 
+test("ReclassifyBySource promotes quality NOASSERTION docs to Filtered, keeps low-quality rejected", async () => {
+  const Store = new InMemoryDocumentStore();
+  await IngestDocuments(
+    [
+      { Source: "acme/lib", License: "NOASSERTION", Lang: "ts", Content: Clean, Provenance: "a.ts", Origin: "web-permissive" },
+      { Source: "acme/lib", License: "NOASSERTION", Lang: "js", Content: Minified, Provenance: "m.js", Origin: "web-permissive" }, // low quality
+      { Source: "other/lib", License: "NOASSERTION", Lang: "go", Content: GoSnippet, Provenance: "g.go", Origin: "web-permissive" }, // different repo — untouched
+    ],
+    Store,
+    "2026-07-13T00:00:00.000Z",
+  );
+  expect((await Store.ByTier("Rejected")).length).toBe(3); // all NOASSERTION => Rejected on license
+
+  const Res = await Store.ReclassifyBySource("acme/lib", "MIT", 0.6);
+  expect(Res).toEqual({ Promoted: 1, KeptLowQuality: 1 });
+  const Filtered = await Store.ByTier("Filtered");
+  expect(Filtered.length).toBe(1);
+  expect(Filtered[0]!.License).toBe("MIT");
+  expect(Filtered[0]!.RejectReason).toBeNull();
+  // the other repo is untouched (scoped by source); low-quality doc stays Rejected with a quality reason
+  expect((await Store.ByTier("Rejected")).length).toBe(2);
+  const StillRejected = (await Store.ByTier("Rejected")).find((D) => D.Source === "acme/lib");
+  expect(String(StillRejected?.RejectReason)).toContain("low quality");
+});
+
 test("provenance-aware dedup: identical content from different origins coexist (no tier clobber)", async () => {
   const Store = new InMemoryDocumentStore();
   await IngestDocuments(

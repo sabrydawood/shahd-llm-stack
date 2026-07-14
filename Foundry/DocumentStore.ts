@@ -34,4 +34,11 @@ export interface DocumentStore {
   DocumentById(Id: string): Promise<DocumentRecord | null>;
   /** Aggregate dashboard stats (counts by tier/lang/license + filtered bytes), computed efficiently. */
   Stats(): Promise<FoundryStats>;
+  /**
+   * Relabel a source's NOASSERTION docs once its real license is verified (license-backfill). Docs
+   * that also pass quality (>= MinQuality) are promoted to Filtered with NewLicense and reject_reason
+   * cleared; the rest keep their tier but get NewLicense + a low-quality reason. Scoped to
+   * license='NOASSERTION' so only the previously-unresolved rows are touched. Returns the split.
+   */
+  ReclassifyBySource(Source: string, NewLicense: string, MinQuality: number): Promise<{ Promoted: number; KeptLowQuality: number }>;
 }

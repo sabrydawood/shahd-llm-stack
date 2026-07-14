@@ -109,6 +109,23 @@ export class PostgresDocumentStore implements DocumentStore {
     return Rows[0] ? FromRow(Rows[0]) : null;
   }
 
+  async ReclassifyBySource(Source: string, NewLicense: string, MinQuality: number): Promise<{ Promoted: number; KeptLowQuality: number }> {
+    // Scoped to license='NOASSERTION' so only the previously-unresolved rows are relabeled. The id
+    // (which encodes the old license) is intentionally left as-is — it is a dedup key, and SkipRepo
+    // by source prevents any future re-ingest that would collide with it.
+    const Promote = await this.Db
+      .update(Documents)
+      .set({ tier: "Filtered", license: NewLicense, rejectReason: null })
+      .where(sql`${Documents.source} = ${Source} and ${Documents.license} = 'NOASSERTION' and ${Documents.quality} >= ${MinQuality}`)
+      .returning({ Id: Documents.id });
+    const Keep = await this.Db
+      .update(Documents)
+      .set({ license: NewLicense, rejectReason: `low quality (score < ${MinQuality})` })
+      .where(sql`${Documents.source} = ${Source} and ${Documents.license} = 'NOASSERTION' and ${Documents.quality} < ${MinQuality}`)
+      .returning({ Id: Documents.id });
+    return { Promoted: Promote.length, KeptLowQuality: Keep.length };
+  }
+
   async Stats(): Promise<FoundryStats> {
     const CountExpr = sql<number>`count(*)::int`;
     const Tiers = await this.Db.select({ Key: Documents.tier, Count: CountExpr }).from(Documents).groupBy(Documents.tier);

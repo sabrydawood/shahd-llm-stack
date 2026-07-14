@@ -172,7 +172,7 @@ export function CreateDashboardParts(Store: DocumentStore, Learn?: LearnFn, Opti
     if (Path === "/api/file") {
       const Doc = await Store.DocumentById(Url.searchParams.get("id") ?? "");
       if (Doc === null) return Json({ error: "not found" }, 404);
-      return Json({ provenance: Doc.Provenance, lang: Doc.Lang, tier: Doc.Tier, bytes: Doc.Bytes, license: Doc.License, origin: Doc.Origin, content: Doc.Content });
+      return Json({ provenance: Doc.Provenance, lang: Doc.Lang, tier: Doc.Tier, bytes: Doc.Bytes, license: Doc.License, origin: Doc.Origin, reason: Doc.RejectReason, content: Doc.Content });
     }
 
     if (Path === "/api/chat/conversations") return Json(Options.Chat !== undefined ? await Options.Chat.ListConversations() : []);

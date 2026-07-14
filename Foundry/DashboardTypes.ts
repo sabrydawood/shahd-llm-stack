@@ -12,6 +12,7 @@ export type LearnSettings = {
   MaxRepos: number; // how many repos to process this run
   MaxFilesPerRepo: number;
   MaxBytesPerRepo: number;
+  MaxContentBytes: number; // per-file size cap (larger files are dropped)
   SkipLearned: boolean; // don't re-learn repos already in the store
 };
 

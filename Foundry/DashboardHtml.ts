@@ -43,7 +43,7 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
    <div id="ghbox"><label>GitHub query</label><input id="query" value="language:typescript stars:>1000"></div>
    <div id="localbox" style="display:none"><label>Local repo paths (comma-separated)</label><input id="repos" value="."></div>
    <div class="row"><div><label>Min level</label><select id="minlevel"><option>medium</option><option>high</option><option>low</option></select></div><div><label>Max repos</label><input id="maxrepos" type="number" value="5"></div></div>
-   <div class="row"><div><label>Max files / repo</label><input id="maxfiles" type="number" value="2000"></div><div><label>Max MB / repo</label><input id="maxmb" type="number" value="32"></div></div>
+   <div class="row"><div><label>Max files/repo</label><input id="maxfiles" type="number" value="2000"></div><div><label>Max MB/repo</label><input id="maxmb" type="number" value="32"></div><div><label>Max KB/file</label><input id="maxkb" type="number" value="512"></div></div>
    <div class="chk"><input type="checkbox" id="skip" checked><label style="margin:0">Skip repos already learned</label></div>
    <button id="go" onclick="learn()">▶ Learn</button>
   </div>
@@ -88,7 +88,7 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
   const go=document.getElementById('go');go.disabled=true;
   const log=document.getElementById('log');log.innerHTML='';
   const line=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;};
-  const body={Source:document.getElementById('source').value,Query:document.getElementById('query').value,Repos:document.getElementById('repos').value.split(',').map(s=>s.trim()).filter(Boolean),MinLevel:document.getElementById('minlevel').value,MaxRepos:+document.getElementById('maxrepos').value,MaxFilesPerRepo:+document.getElementById('maxfiles').value,MaxBytesPerRepo:(+document.getElementById('maxmb').value)*1e6,SkipLearned:document.getElementById('skip').checked};
+  const body={Source:document.getElementById('source').value,Query:document.getElementById('query').value,Repos:document.getElementById('repos').value.split(',').map(s=>s.trim()).filter(Boolean),MinLevel:document.getElementById('minlevel').value,MaxRepos:+document.getElementById('maxrepos').value,MaxFilesPerRepo:+document.getElementById('maxfiles').value,MaxBytesPerRepo:(+document.getElementById('maxmb').value)*1e6,MaxContentBytes:(+document.getElementById('maxkb').value)*1e3,SkipLearned:document.getElementById('skip').checked};
   fetch('/api/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).then(res=>{
    if(res.error){line('error: '+res.error,'err');go.disabled=false;return;}
    const es=new EventSource('/api/learn/stream');

@@ -22,23 +22,37 @@ export type GitHubRepoOptions = {
   FetchBytes?: FetchBytes; // repo tarball (bytes)
   MaxFilesPerRepo?: number; // cap so a monorepo can't dominate (generous by default)
   MaxBytesPerRepo?: number; // byte budget per repo
+  MaxContentBytesPerRepo?: number; // per-file size cap
   MinLevel?: RepoLevel; // skip repos below this level
   SkipRepo?: (Repo: string) => boolean; // skip already-learned repos (before download)
   OnRepo?: (Info: RepoIngestInfo) => void; // progress/reporting hook
 };
 
+// GitHub search returns at most 100 results per page and 1000 total per query.
+const SearchPerPage = 100;
+const SearchMaxResults = 1000;
+
 export function CreateGitHubRepoProvider(Options: GitHubRepoOptions = {}): WebProvider {
   const Http = Options.Http ?? DefaultGitHubJson(Options.Token);
   const Fetch = Options.FetchBytes ?? DefaultGitHubBytes(Options.Token);
-  const Limits = { MaxFiles: Options.MaxFilesPerRepo, MaxBytes: Options.MaxBytesPerRepo };
+  const Limits = { MaxFiles: Options.MaxFilesPerRepo, MaxBytes: Options.MaxBytesPerRepo, MaxContentBytes: Options.MaxContentBytesPerRepo };
   const MinLevel = Options.MinLevel ?? "medium";
 
   return {
     Name: "github-repo",
     Fetch: async (Query: string, Limit: number): Promise<SourceInput[]> => {
-      const Search = (await Http(`https://api.github.com/search/repositories?q=${encodeURIComponent(Query)}&per_page=${Limit}`)) as SearchResult;
+      // Paginate the search so MaxRepos beyond 100 is honored (up to GitHub's 1000-result cap).
+      const Want = Math.min(Limit, SearchMaxResults);
+      const Repos: RepoItem[] = [];
+      for (let Page = 1; Repos.length < Want && Page <= Math.ceil(SearchMaxResults / SearchPerPage); Page++) {
+        const PerPage = Math.min(SearchPerPage, Want - Repos.length);
+        const Search = (await Http(`https://api.github.com/search/repositories?q=${encodeURIComponent(Query)}&per_page=${PerPage}&page=${Page}`)) as SearchResult;
+        const Items = Search.items ?? [];
+        Repos.push(...Items);
+        if (Items.length < PerPage) break; // no more results
+      }
       const Out: SourceInput[] = [];
-      for (const Repo of Search.items ?? []) {
+      for (const Repo of Repos) {
         const License = Repo.license?.spdx_id ?? "unknown";
         if (Options.SkipRepo?.(Repo.full_name) === true) {
           Options.OnRepo?.({ Repo: Repo.full_name, License, Assessment: EmptyAssessment, Ingested: false, Reason: "already learned" });

@@ -36,6 +36,7 @@ function ParseSettings(Body: Record<string, unknown>): LearnSettings {
     MaxRepos: ToNum(Body["MaxRepos"], 5),
     MaxFilesPerRepo: ToNum(Body["MaxFilesPerRepo"], 2000),
     MaxBytesPerRepo: ToNum(Body["MaxBytesPerRepo"], 32_000_000),
+    MaxContentBytes: ToNum(Body["MaxContentBytes"], 512_000),
     SkipLearned: Body["SkipLearned"] !== false,
   };
 }

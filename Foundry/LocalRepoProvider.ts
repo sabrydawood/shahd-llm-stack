@@ -13,8 +13,9 @@ import { DefaultRepoLimits } from "./RepoArchive.ts";
 import { AssessRepo, LevelRank, EmptyAssessment } from "./RepoQuality.ts";
 import type { RepoLevel, RepoIngestInfo } from "./RepoQuality.ts";
 import { IsSubstantiveCodePath, IsSubstantiveCodeContent, LangForPath } from "./CodeFileFilter.ts";
+import { StripLicenseHeader } from "./ContentNormalizer.ts";
 
-function WalkRepo(Root: string, MaxFiles: number, MaxBytes: number): RepoFile[] {
+function WalkRepo(Root: string, MaxFiles: number, MaxBytes: number, MaxContentBytes: number): RepoFile[] {
   const Out: RepoFile[] = [];
   let Bytes = 0;
   const Walk = (Dir: string): void => {
@@ -36,11 +37,11 @@ function WalkRepo(Root: string, MaxFiles: number, MaxBytes: number): RepoFile[] 
         if (!IsSubstantiveCodePath(Rel)) continue;
         let Content: string;
         try {
-          Content = readFileSync(Full, "utf8");
+          Content = StripLicenseHeader(readFileSync(Full, "utf8"));
         } catch {
           continue;
         }
-        if (!IsSubstantiveCodeContent(Content)) continue;
+        if (!IsSubstantiveCodeContent(Content, MaxContentBytes)) continue;
         Out.push({ Path: Rel, Content });
         Bytes += Content.length;
       }
@@ -56,6 +57,7 @@ export type LocalRepoOptions = {
   MinLevel?: RepoLevel;
   MaxFiles?: number;
   MaxBytes?: number;
+  MaxContentBytes?: number;
   SkipRepo?: (Repo: string) => boolean;
   OnRepo?: (Info: RepoIngestInfo) => void;
 };
@@ -65,6 +67,7 @@ export function CreateLocalRepoProvider(Options: LocalRepoOptions): WebProvider 
   const MinLevel = Options.MinLevel ?? "medium";
   const MaxFiles = Options.MaxFiles ?? DefaultRepoLimits.MaxFiles;
   const MaxBytes = Options.MaxBytes ?? DefaultRepoLimits.MaxBytes;
+  const MaxContentBytes = Options.MaxContentBytes ?? DefaultRepoLimits.MaxContentBytes;
   return {
     Name: "local-repo",
     Fetch: async (): Promise<SourceInput[]> => {
@@ -75,7 +78,7 @@ export function CreateLocalRepoProvider(Options: LocalRepoOptions): WebProvider 
           Options.OnRepo?.({ Repo: Name, License, Assessment: EmptyAssessment, Ingested: false, Reason: "already learned" });
           continue;
         }
-        const Files = WalkRepo(Root, MaxFiles, MaxBytes);
+        const Files = WalkRepo(Root, MaxFiles, MaxBytes, MaxContentBytes);
         const Assessment = AssessRepo(Files);
         const Ingested = LevelRank[Assessment.Level] >= LevelRank[MinLevel];
         Options.OnRepo?.({ Repo: Name, License, Assessment, Ingested });

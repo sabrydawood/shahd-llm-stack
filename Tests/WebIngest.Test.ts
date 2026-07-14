@@ -8,6 +8,7 @@ import {
 } from "../Foundry/FoundryBarrel.ts";
 import type { HttpJson, SearchBackend, PageFetch } from "../Foundry/FoundryBarrel.ts";
 import { IsSubstantiveCodePath, IsSubstantiveCodeContent } from "../Foundry/CodeFileFilter.ts";
+import { StripLicenseHeader } from "../Foundry/ContentNormalizer.ts";
 
 // A substantive code file (passes the content gate); the tiny stub the old test used would now be
 // correctly rejected as too small.
@@ -79,6 +80,17 @@ test("code file filter rejects junk paths and thin content, keeps real source", 
   expect(IsSubstantiveCodePath("README.md")).toBe(false); // not code
   expect(IsSubstantiveCodeContent('declare module "*.txt" { const c: string }\n')).toBe(false); // stub
   expect(IsSubstantiveCodeContent(SampleCode)).toBe(true);
+});
+
+test("StripLicenseHeader drops the license banner but keeps code + comments", () => {
+  const WithHeader = "/*-----\n * Copyright (c) Microsoft Corporation. All rights reserved.\n * Licensed under the MIT License.\n *-----*/\n\nimport { x } from \"y\";\n// a real comment\nexport const z = 1;\n";
+  const Stripped = StripLicenseHeader(WithHeader);
+  expect(Stripped).not.toContain("Copyright");
+  expect(Stripped.startsWith("import { x }")).toBe(true);
+  expect(Stripped).toContain("// a real comment"); // meaningful code comment is kept
+  // a leading NON-license comment (a docstring) is preserved untouched
+  const Doc = "// This module parses configuration files.\nexport function parse() {}\n";
+  expect(StripLicenseHeader(Doc)).toBe(Doc);
 });
 
 test("HtmlToText strips tags, script/style, and entities", () => {

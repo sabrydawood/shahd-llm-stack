@@ -58,10 +58,10 @@ export function RankCodePath(Path: string): number {
 }
 
 /** Does the fetched content look like substantive, human-written code (not a stub/blob/comment header)? */
-export function IsSubstantiveCodeContent(Text: string): boolean {
+export function IsSubstantiveCodeContent(Text: string, MaxBytes = 512_000): boolean {
   const Trimmed = Text.trim();
   if (Trimmed.length < 300) return false; // stub / near-empty
-  if (Trimmed.length > 100_000) return false; // likely generated/huge
+  if (Trimmed.length > MaxBytes) return false; // beyond the size budget (likely generated/bundled)
   if (/data:(font|image|application)|;base64,/i.test(Text)) return false; // embedded blobs
   // Strip block + line comments; require enough real code left (not just a license header).
   const NoComments = Text

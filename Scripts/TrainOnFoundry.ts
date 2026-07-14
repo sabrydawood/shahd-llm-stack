@@ -19,7 +19,8 @@ import { TrainLoop } from "../Brain/Training/TrainLoop.ts";
 import { Logger } from "../Brain/Logging/Logger.ts";
 import { Generate } from "../Brain/Sampling/Generate.ts";
 import { DefaultSampling } from "../Brain/Sampling/Sampler.ts";
-import { SaveCheckpoint } from "../Brain/Checkpoint/CheckpointWriter.ts";
+import { BuildCheckpoint, WriteCheckpointObject } from "../Brain/Checkpoint/CheckpointWriter.ts";
+import { PostgresCheckpointStore } from "../Foundry/PostgresCheckpointStore.ts";
 import { ActivateFromConfig } from "../Brain/ComputeBackend/BackendSelector.ts";
 import { ResolveStore } from "./FoundryEnv.ts";
 import { ReadArg, ReadFlag } from "./ScriptArgs.ts";
@@ -92,8 +93,20 @@ if (Measure) {
   process.exit(0);
 }
 
-SaveCheckpoint(SavePath, Model, Optimizer, Rng, { FinalStep: Config.Schedule.MaxSteps, Corpus: "foundry-filtered" }, { Kind: "Bpe", Merges: Bpe.Merges });
-console.log(`saved ${SavePath}`);
+// Build the checkpoint once, then persist it: Postgres (durable, source of truth) when DATABASE_URL
+// is set, plus a local file cache for fast dashboard load.
+const Ckpt = BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: Config.Schedule.MaxSteps, Corpus: "foundry-filtered" }, { Kind: "Bpe", Merges: Bpe.Merges });
+WriteCheckpointObject(SavePath, Ckpt);
+const CkptName = ReadArg("--Name=", "foundry");
+const DbUrl = process.env["DATABASE_URL"];
+if (DbUrl !== undefined && DbUrl !== "") {
+  const Store2 = new PostgresCheckpointStore(DbUrl);
+  await Store2.Save(CkptName, Ckpt, new Date().toISOString());
+  await Store2.Close();
+  console.log(`saved ${SavePath} + Postgres checkpoint "${CkptName}"`);
+} else {
+  console.log(`saved ${SavePath}`);
+}
 
 const Sample = Generate(Model, Tokenizer.Encode("export function "), 160, { ...DefaultSampling, Temperature: 0.7 }, Rng.SamplingRng);
 console.log("\n--- sample ---\n" + Tokenizer.Decode(Sample));

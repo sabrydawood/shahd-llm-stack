@@ -25,21 +25,21 @@ function ExtractShahdConfig(Config: ResolvedConfig): ShahdConfig {
   };
 }
 
-export function SaveCheckpoint(
-  Path: string,
+/** Build the serializable checkpoint object (no I/O) — storage (file or Postgres) is a caller concern. */
+export function BuildCheckpoint(
   Model: Shahd,
   Optimizer: Optimizer,
   Rng: RngStreams,
   Meta: Record<string, unknown> = {},
   TokenizerState: unknown | null = null,
-): void {
+): Checkpoint {
   const Params: TensorState[] = Model.Parameters().map((P) => ({
     Rows: P.Rows,
     Cols: P.Cols,
     Data: EncodeFloat64(P.Data),
   }));
 
-  const Payload: Checkpoint = {
+  return {
     FormatVersion: CheckpointFormatVersion,
     ConfigHash: Model.Config.ConfigHash,
     Config: ExtractShahdConfig(Model.Config),
@@ -58,8 +58,22 @@ export function SaveCheckpoint(
     TokenizerState,
     Meta,
   };
+}
 
+/** Write an already-built checkpoint object to a file (creating parent dirs). */
+export function WriteCheckpointObject(Path: string, Ckpt: Checkpoint): void {
   const Dir = dirname(Path);
   if (Dir !== "" && !existsSync(Dir)) mkdirSync(Dir, { recursive: true });
-  writeFileSync(Path, JSON.stringify(Payload));
+  writeFileSync(Path, JSON.stringify(Ckpt));
+}
+
+export function SaveCheckpoint(
+  Path: string,
+  Model: Shahd,
+  Optimizer: Optimizer,
+  Rng: RngStreams,
+  Meta: Record<string, unknown> = {},
+  TokenizerState: unknown | null = null,
+): void {
+  WriteCheckpointObject(Path, BuildCheckpoint(Model, Optimizer, Rng, Meta, TokenizerState));
 }

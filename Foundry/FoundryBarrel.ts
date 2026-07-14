@@ -20,6 +20,8 @@ export type { ModelInfo, ParamGroup } from "./ModelInfo.ts";
 export type { ChatStore, ConversationSummary, ChatMessage } from "./ChatStore.ts";
 export { InMemoryChatStore } from "./InMemoryChatStore.ts";
 export { PostgresChatStore } from "./PostgresChatStore.ts";
+export { PostgresCheckpointStore } from "./PostgresCheckpointStore.ts";
+export type { CheckpointSummary } from "./PostgresCheckpointStore.ts";
 export { ChatService } from "./ChatService.ts";
 export type { ChatStreamFn, ChatOpts } from "./ChatService.ts";
 export type { IngestProgress } from "./WebSource.ts";

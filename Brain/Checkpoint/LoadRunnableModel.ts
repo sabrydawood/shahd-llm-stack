@@ -12,12 +12,13 @@ import type { Tokenizer } from "../Tokenizer/TokenizerTypes.ts";
 import { Shahd } from "../Nn/Shahd.ts";
 import { CreateOptimizer } from "../Optim/OptimBarrel.ts";
 import { LoadCheckpoint, ApplyCheckpoint } from "./CheckpointReader.ts";
+import type { Checkpoint } from "./CheckpointFormat.ts";
 import type { ConfigOverride, ResolvedConfig } from "../Config/ConfigTypes.ts";
 
 export type RunnableModel = { Model: Shahd; Tokenizer: Tokenizer; Config: ResolvedConfig; Rng: RngStreams };
 
-export function LoadRunnableModel(Path: string): RunnableModel {
-  const Ckpt = LoadCheckpoint(Path);
+/** Build a runnable model from an already-parsed checkpoint (file or Postgres — storage-agnostic). */
+export function LoadRunnableModelFrom(Ckpt: Checkpoint): RunnableModel {
   // Rebuild the exact config from the checkpoint (UseCli/UseEnv off so it isn't perturbed).
   const Config = LoadConfig({ Overrides: Ckpt.Config as ConfigOverride, UseCli: false, UseEnv: false });
   const Rng = CreateRngStreams(Config.Training.Seed);
@@ -27,6 +28,11 @@ export function LoadRunnableModel(Path: string): RunnableModel {
 
   const Tokenizer = RebuildTokenizer(Ckpt.TokenizerState);
   return { Model, Tokenizer, Config, Rng };
+}
+
+/** Build a runnable model from a checkpoint FILE. */
+export function LoadRunnableModel(Path: string): RunnableModel {
+  return LoadRunnableModelFrom(LoadCheckpoint(Path));
 }
 
 // Rebuild the persisted tokenizer for SERVING. Char tokenizers are built Lenient (an unseen char is

@@ -11,12 +11,17 @@ import type { Checkpoint } from "./CheckpointFormat.ts";
 
 const ShapeFields = ["EmbedDim", "NumLayers", "NumHeads", "BlockSize", "VocabSize"] as const;
 
-export function LoadCheckpoint(Path: string): Checkpoint {
-  const Data = JSON.parse(readFileSync(Path, "utf8")) as Checkpoint;
+/** Parse a checkpoint from its JSON text (used by both the file loader and the Postgres store). */
+export function ParseCheckpoint(Text: string): Checkpoint {
+  const Data = JSON.parse(Text) as Checkpoint;
   if (Data.FormatVersion !== CheckpointFormatVersion) {
-    throw new Error(`LoadCheckpoint: format version ${Data.FormatVersion} != ${CheckpointFormatVersion}`);
+    throw new Error(`ParseCheckpoint: format version ${Data.FormatVersion} != ${CheckpointFormatVersion}`);
   }
   return Data;
+}
+
+export function LoadCheckpoint(Path: string): Checkpoint {
+  return ParseCheckpoint(readFileSync(Path, "utf8"));
 }
 
 export function ApplyCheckpoint(Ckpt: Checkpoint, Model: Shahd, Optimizer: Optimizer, Rng: RngStreams): void {

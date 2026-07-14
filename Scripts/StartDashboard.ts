@@ -13,7 +13,9 @@ import { ChatService } from "../Foundry/ChatService.ts";
 import type { ChatStreamFn } from "../Foundry/ChatService.ts";
 import { DescribeModel } from "../Foundry/ModelInfo.ts";
 import type { ModelInfo } from "../Foundry/ModelInfo.ts";
-import { LoadRunnableModel } from "../Brain/Checkpoint/LoadRunnableModel.ts";
+import { LoadRunnableModel, LoadRunnableModelFrom } from "../Brain/Checkpoint/LoadRunnableModel.ts";
+import type { RunnableModel } from "../Brain/Checkpoint/LoadRunnableModel.ts";
+import { PostgresCheckpointStore } from "../Foundry/PostgresCheckpointStore.ts";
 import { GuardedGenerateStream } from "../Brain/Safety/GuardedGenerate.ts";
 import { RenderMessages } from "../Brain/Serving/RenderChat.ts";
 import { DefaultSampling } from "../Brain/Sampling/Sampler.ts";
@@ -26,26 +28,53 @@ const { Store, Kind } = ResolveStore();
 
 // Best-effort: load a checkpoint so the /chat page works (streaming + persistent memory). If none
 // exists (or loading fails), the dashboard still serves and chat reports "no model loaded".
-function LoadChat(): { Chat?: ChatService; Model: ModelInfo | null; Note: string } {
-  // Prefer the byte-level Foundry model (full char coverage, code-trained) over the seed checkpoint.
-  const Default = existsSync("Checkpoints/Foundry.ckpt") ? "Checkpoints/Foundry.ckpt" : "Checkpoints/Corpus.ckpt";
-  const Path = process.env["FOUNDRY_CHECKPOINT"] ?? ReadArg("--Checkpoint=", Default);
-  if (!existsSync(Path)) return { Model: null, Note: `no checkpoint at ${Path} (chat disabled)` };
-  try {
-    const { Model, Tokenizer, Config } = LoadRunnableModel(Path);
-    let Counter = 0;
-    const Stream: ChatStreamFn = (Messages, Opts, OnDelta) => {
-      const Prompt = RenderMessages(Messages.map((M) => ({ role: M.Role, content: M.Content })));
-      const Rng = new SeededRng(Config.Training.Seed + Counter++);
-      return GuardedGenerateStream(Model, Tokenizer, Prompt, Opts.MaxTokens, { ...DefaultSampling, Temperature: Opts.Temperature }, Rng, Config, OnDelta, Opts.ShouldStop);
-    };
-    // Chat memory in Postgres (synced with the corpus, durable) when DATABASE_URL is set; else in-memory.
-    const DbUrl = process.env["DATABASE_URL"];
-    const Chats: ChatStore = DbUrl !== undefined && DbUrl !== "" ? new PostgresChatStore(DbUrl) : new InMemoryChatStore();
-    return { Chat: new ChatService(Chats, Stream), Model: DescribeModel(Model), Note: `chat model: ${Path} (memory: ${DbUrl ? "postgres" : "in-memory"})` };
-  } catch (Caught) {
-    return { Model: null, Note: `chat disabled: ${(Caught as Error).message}` };
+async function LoadChat(): Promise<{ Chat?: ChatService; Model: ModelInfo | null; Note: string }> {
+  const DbUrl = process.env["DATABASE_URL"];
+  const CkptName = process.env["FOUNDRY_CHECKPOINT_NAME"] ?? "foundry";
+  let Runnable: RunnableModel | null = null;
+  let Source = "";
+
+  // 1. Postgres checkpoint (durable, synced with the corpus + chat) — preferred.
+  if (DbUrl !== undefined && DbUrl !== "") {
+    try {
+      const CkptStore = new PostgresCheckpointStore(DbUrl);
+      const Ckpt = await CkptStore.Load(CkptName);
+      await CkptStore.Close();
+      if (Ckpt !== null) {
+        Runnable = LoadRunnableModelFrom(Ckpt);
+        Source = `postgres:${CkptName}`;
+      }
+    } catch {
+      // fall through to the file fallback
+    }
   }
+
+  // 2. File fallback (byte-level Foundry model if present, else the seed checkpoint).
+  if (Runnable === null) {
+    const Default = existsSync("Checkpoints/Foundry.ckpt") ? "Checkpoints/Foundry.ckpt" : "Checkpoints/Corpus.ckpt";
+    const Path = process.env["FOUNDRY_CHECKPOINT"] ?? ReadArg("--Checkpoint=", Default);
+    if (existsSync(Path)) {
+      try {
+        Runnable = LoadRunnableModel(Path);
+        Source = `file:${Path}`;
+      } catch (Caught) {
+        return { Model: null, Note: `chat disabled: ${(Caught as Error).message}` };
+      }
+    }
+  }
+
+  if (Runnable === null) return { Model: null, Note: "no checkpoint (Postgres or file) — train one first (bun run Scripts/TrainOnFoundry.ts)" };
+
+  const { Model, Tokenizer, Config } = Runnable;
+  let Counter = 0;
+  const Stream: ChatStreamFn = (Messages, Opts, OnDelta) => {
+    const Prompt = RenderMessages(Messages.map((M) => ({ role: M.Role, content: M.Content })));
+    const Rng = new SeededRng(Config.Training.Seed + Counter++);
+    return GuardedGenerateStream(Model, Tokenizer, Prompt, Opts.MaxTokens, { ...DefaultSampling, Temperature: Opts.Temperature }, Rng, Config, OnDelta, Opts.ShouldStop);
+  };
+  // Chat memory in Postgres (synced, durable) when DATABASE_URL is set; else in-memory.
+  const Chats: ChatStore = DbUrl !== undefined && DbUrl !== "" ? new PostgresChatStore(DbUrl) : new InMemoryChatStore();
+  return { Chat: new ChatService(Chats, Stream), Model: DescribeModel(Model), Note: `chat model: ${Source} (memory: ${DbUrl ? "postgres" : "in-memory"})` };
 }
 
 // The real provider-backed Learn runner injected into the dashboard.
@@ -74,7 +103,7 @@ const Learn: LearnFn = async (Settings, OnEvent) => {
 };
 
 const Port = Number(ReadArg("--Port=", "8090"));
-const { Chat, Model, Note } = LoadChat();
+const { Chat, Model, Note } = await LoadChat();
 StartDashboard(Store, Port, Learn, { Chat, Model });
 console.log(`Foundry control panel: http://localhost:${Port}  (store=${Kind}, ${await Store.Count()} docs, GitHub token: ${GitHubToken() ? "yes" : "no"})`);
 console.log(`  ${Note}`);

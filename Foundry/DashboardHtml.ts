@@ -69,7 +69,8 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
   <div class="panel stage">
    <h2>① Collect Data <span class="badge" id="cbadge">idle</span></h2>
    <label>Source</label>
-   <select id="source"><option value="github">Public GitHub repos</option><option value="local">Our own repos (local)</option><option value="both">Both</option></select>
+   <select id="source"><option value="github">Public GitHub repos</option><option value="local">Our own repos (local)</option><option value="both">Both</option><option value="oasst">OASST conversations (general/chat — Apache-2.0)</option></select>
+   <div class="hint">For OASST: put a language in <b>Query</b> (<code>all</code>, <code>en</code>, <code>ar</code>…) and the max conversations in <b>Max repos</b>.</div>
    <div id="ghbox"><label>GitHub query</label><input id="query" value="language:typescript stars:>1000"></div>
    <div id="localbox" style="display:none"><label>Local repo paths</label><input id="repos" value="."></div>
    <div class="row"><div><label>Min level</label><select id="minlevel"><option>medium</option><option>high</option><option>low</option></select></div><div><label>Max repos</label><input id="maxrepos" type="number" value="5"></div></div>

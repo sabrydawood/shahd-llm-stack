@@ -5,8 +5,8 @@
 import type { RepoLevel } from "./RepoQuality.ts";
 
 export type LearnSettings = {
-  Source: "github" | "local" | "both";
-  Query: string; // GitHub search query
+  Source: "github" | "local" | "both" | "oasst";
+  Query: string; // GitHub search query — or, for oasst, a language filter ("all" | "en" | "ar" | …)
   Repos: string[]; // local repo roots
   MinLevel: RepoLevel;
   MaxRepos: number; // how many repos to process this run

@@ -5,7 +5,7 @@
 // run finishes it is hot-reloaded into the chat model with no restart.
 //   bun run foundry:dashboard      # then open http://localhost:8090
 
-import { StartDashboard, IngestDocuments, CreateGitHubRepoProvider, CreateLocalRepoProvider } from "../Foundry/FoundryBarrel.ts";
+import { StartDashboard, IngestDocuments, CreateGitHubRepoProvider, CreateLocalRepoProvider, CreateOasstProvider } from "../Foundry/FoundryBarrel.ts";
 import type { LearnFn, WebProvider, RepoIngestInfo, LearnEvent, TrainFn, TrainSettings, TrainEvent, SourceInput } from "../Foundry/FoundryBarrel.ts";
 import type { ChatStore, ChatMessage } from "../Foundry/ChatStore.ts";
 import { PostgresChatStore } from "../Foundry/PostgresChatStore.ts";
@@ -177,11 +177,17 @@ const Learn: LearnFn = async (Settings, OnEvent, Signal) => {
     OnEvent({ kind: "scanning", label: "downloading " + Repo + "…" });
   };
   const Providers: WebProvider[] = [];
-  if (Settings.Source !== "local") {
-    Providers.push(CreateGitHubRepoProvider({ Token: GitHubToken(), MinLevel: Settings.MinLevel, MaxFilesPerRepo: Settings.MaxFilesPerRepo, MaxBytesPerRepo: Settings.MaxBytesPerRepo, MaxContentBytesPerRepo: Settings.MaxContentBytes, SkipRepo: Skip, OnRepoStart, OnRepo, OnRepoReady }));
-  }
-  if (Settings.Source !== "github") {
-    Providers.push(CreateLocalRepoProvider({ Roots: Settings.Repos, MinLevel: Settings.MinLevel, MaxFiles: Settings.MaxFilesPerRepo, MaxBytes: Settings.MaxBytesPerRepo, MaxContentBytes: Settings.MaxContentBytes, SkipRepo: Skip, OnRepoStart, OnRepo, OnRepoReady }));
+  if (Settings.Source === "oasst") {
+    // General/conversation data (OASST — Apache-2.0, multilingual): Query is the language filter,
+    // MaxRepos is the max number of conversations to pull.
+    Providers.push(CreateOasstProvider({ OnRepoStart, OnRepoReady }));
+  } else {
+    if (Settings.Source !== "local") {
+      Providers.push(CreateGitHubRepoProvider({ Token: GitHubToken(), MinLevel: Settings.MinLevel, MaxFilesPerRepo: Settings.MaxFilesPerRepo, MaxBytesPerRepo: Settings.MaxBytesPerRepo, MaxContentBytesPerRepo: Settings.MaxContentBytes, SkipRepo: Skip, OnRepoStart, OnRepo, OnRepoReady }));
+    }
+    if (Settings.Source !== "github") {
+      Providers.push(CreateLocalRepoProvider({ Roots: Settings.Repos, MinLevel: Settings.MinLevel, MaxFiles: Settings.MaxFilesPerRepo, MaxBytes: Settings.MaxBytesPerRepo, MaxContentBytes: Settings.MaxContentBytes, SkipRepo: Skip, OnRepoStart, OnRepo, OnRepoReady }));
+    }
   }
   OnEvent({ kind: "scanning", label: "searching for repos…" });
   console.log(`[learn] start: source=${Settings.Source} query="${Settings.Query}" maxRepos=${Settings.MaxRepos} minLevel=${Settings.MinLevel} skipLearned=${Settings.SkipLearned} (already know ${Learned.size} repos)`);

@@ -36,6 +36,8 @@ export { CreateGitHubRepoProvider } from "./GitHubRepoProvider.ts";
 export type { GitHubRepoOptions } from "./GitHubRepoProvider.ts";
 export { CreateLocalRepoProvider } from "./LocalRepoProvider.ts";
 export type { LocalRepoOptions } from "./LocalRepoProvider.ts";
+export { CreateOasstProvider } from "./OasstProvider.ts";
+export type { OasstOptions } from "./OasstProvider.ts";
 export { FetchRepoFiles, DefaultRepoLimits } from "./RepoArchive.ts";
 export type { RepoFile, RepoLimits } from "./RepoArchive.ts";
 export { AssessRepo, LevelRank, EmptyAssessment } from "./RepoQuality.ts";

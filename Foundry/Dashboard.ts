@@ -41,6 +41,7 @@ function SafeName(Value: unknown): string {
 
 function ParseTrainSettings(Body: Record<string, unknown>): TrainSettings {
   return {
+    Kind: Body["Kind"] === "chat" ? "chat" : "pretrain",
     Name: SafeName(Body["Name"]),
     Steps: ToNum(Body["Steps"], 500),
     CorpusMb: ToNum(Body["CorpusMb"], 1.5),

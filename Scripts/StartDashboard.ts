@@ -229,16 +229,18 @@ const ParseTrainLine = (Line: string, Settings: TrainSettings, OnEvent: (Event: 
 };
 
 const Train: TrainFn = async (Settings, OnEvent, Signal) => {
-  const Proc = Bun.spawn(
-    [
-      "bun", "run", "Scripts/TrainOnFoundry.ts",
-      `--Steps=${Settings.Steps}`, `--CorpusMb=${Settings.CorpusMb}`,
-      `--EmbedDim=${Settings.EmbedDim}`, `--Layers=${Settings.NumLayers}`, `--Heads=${Settings.NumHeads}`,
-      `--Block=${Settings.BlockSize}`, `--Merges=${Settings.Merges}`, `--Batch=${Settings.BatchSize}`,
-      `--Name=${Settings.Name}`,
-    ],
-    { stdout: "pipe", stderr: "pipe", env: { ...process.env } },
-  );
+  // pretrain -> base model (TrainOnFoundry); chat -> SFT chat model (TrainSftChat). Both workers emit
+  // the same {Step,TrainLoss,ElapsedMs} progress lines, so ParseTrainLine handles either identically.
+  const Common = [
+    `--Name=${Settings.Name}`, `--Steps=${Settings.Steps}`, `--Merges=${Settings.Merges}`,
+    `--EmbedDim=${Settings.EmbedDim}`, `--Layers=${Settings.NumLayers}`, `--Heads=${Settings.NumHeads}`,
+    `--Block=${Settings.BlockSize}`, `--Batch=${Settings.BatchSize}`,
+  ];
+  const Args = Settings.Kind === "chat"
+    ? ["bun", "run", "Scripts/TrainSftChat.ts", ...Common]
+    : ["bun", "run", "Scripts/TrainOnFoundry.ts", ...Common, `--CorpusMb=${Settings.CorpusMb}`];
+  console.log(`[train] ${Settings.Kind} "${Settings.Name}": ${Settings.Steps} steps`);
+  const Proc = Bun.spawn(Args, { stdout: "pipe", stderr: "pipe", env: { ...process.env } });
   const OnAbort = (): void => {
     try {
       Proc.kill();

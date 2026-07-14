@@ -84,6 +84,7 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
   </div>
   <div class="panel stage train">
    <h2>② Train Model <span class="badge" id="tbadge">idle</span></h2>
+   <label>Mode</label><select id="tkind"><option value="pretrain">Pretrain — base model (autocomplete)</option><option value="chat">Chat / SFT — replies + tools + thinking</option></select>
    <label>Model name <span style="color:var(--mut)">— train/keep several side by side</span></label><input id="tname" value="foundry">
    <div class="row"><div><label>Embed dim</label><input id="tembed" type="number" value="96"></div><div><label>Layers</label><input id="tlayers" type="number" value="3"></div><div><label>Heads</label><input id="theads" type="number" value="4"></div></div>
    <div class="row"><div><label>Context</label><input id="tctx" type="number" value="96"></div><div><label>Vocab</label><input id="tvocab" type="number" value="512"></div><div><label>Batch</label><input id="tbatch" type="number" value="16"></div></div>
@@ -108,7 +109,7 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
  var badge=function(id,txt,cls){var b=Q(id);b.textContent=txt;b.className='badge'+(cls?' '+cls:'');};
  var logLine=function(el,t,c){var d=document.createElement('div');if(c)d.className=c;d.innerHTML='<span class="t">'+new Date().toTimeString().slice(0,8)+'</span>  '+H(t);el.appendChild(d);el.scrollTop=el.scrollHeight;};
  Q('source').onchange=function(e){var v=e.target.value;Q('ghbox').style.display=v==='local'?'none':'';Q('localbox').style.display=v==='github'?'none':'';};
- var FIELDS=['source','query','repos','minlevel','maxrepos','maxfiles','maxmb','maxkb','skip','tname','tsteps','tcorpus','tembed','tlayers','theads','tctx','tvocab','tbatch'];
+ var FIELDS=['source','query','repos','minlevel','maxrepos','maxfiles','maxmb','maxkb','skip','tkind','tname','tsteps','tcorpus','tembed','tlayers','theads','tctx','tvocab','tbatch'];
  function saveSettings(){var o={};FIELDS.forEach(function(id){var el=Q(id);o[id]=el.type==='checkbox'?el.checked:el.value;});try{localStorage.setItem('shahd.cfg',JSON.stringify(o));}catch(e){}}
  function restoreSettings(){try{var o=JSON.parse(localStorage.getItem('shahd.cfg')||'{}');FIELDS.forEach(function(id){if(o[id]===undefined)return;var el=Q(id);if(el.type==='checkbox')el.checked=!!o[id];else el.value=o[id];});Q('source').dispatchEvent(new Event('change'));}catch(e){}}
 
@@ -170,7 +171,7 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
   else if(e.kind==='train-done'){training=false;setBtn('tgo','idle');badge('tbadge','done','ok');setTrain(1,'complete',Q('tloss').textContent);logLine(log,'✓ trained + saved to '+e.savedTo+' — model reloaded into Chat','ok');}
   else if(e.kind==='train-error'){training=false;setBtn('tgo','idle');var stopped=e.message.indexOf('stop')>=0;badge('tbadge',stopped?'stopped':'error',stopped?'skip':'err');logLine(log,(stopped?'■ ':'error: ')+e.message,stopped?'skip':'err');}
  }
- function train(){saveSettings();var s={Name:Q('tname').value,Steps:+Q('tsteps').value,CorpusMb:+Q('tcorpus').value,EmbedDim:+Q('tembed').value,NumLayers:+Q('tlayers').value,NumHeads:+Q('theads').value,BlockSize:+Q('tctx').value,Merges:Math.max(0,(+Q('tvocab').value)-256),BatchSize:+Q('tbatch').value};if(WS&&WS.readyState===1)WS.send(JSON.stringify({type:'train',settings:s}));else logLine(Q('tlog'),'not connected','err');}
+ function train(){saveSettings();var s={Kind:Q('tkind').value,Name:Q('tname').value,Steps:+Q('tsteps').value,CorpusMb:+Q('tcorpus').value,EmbedDim:+Q('tembed').value,NumLayers:+Q('tlayers').value,NumHeads:+Q('theads').value,BlockSize:+Q('tctx').value,Merges:Math.max(0,(+Q('tvocab').value)-256),BatchSize:+Q('tbatch').value};if(WS&&WS.readyState===1)WS.send(JSON.stringify({type:'train',settings:s}));else logLine(Q('tlog'),'not connected','err');}
  // ── chat-model picker ──
  var loadedName='';
  function renderCheckpoints(list){if(!list||!list.length){Q('ckptsel').innerHTML='';return;}var opts=list.map(function(c){return '<option value="'+H(c.Name)+'"'+(c.Name===loadedName?' selected':'')+'>'+H(c.Name)+' — '+fmtN(c.Params)+'p · '+H(c.Arch)+'</option>';}).join('');Q('ckptsel').innerHTML='<label style="margin:0 0 3px">chat model ('+list.length+' saved — pick to switch)</label><select id="ckptdd" onchange="loadModel(this.value)" style="margin-bottom:9px">'+opts+'</select>';}

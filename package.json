@@ -12,7 +12,6 @@
     "gradcheck": "bun run Scripts/RunGradCheck.ts",
     "train": "bun run Scripts/Train.ts",
     "sample": "bun run Scripts/Sample.ts",
-    "dashboard": "bun run Scripts/StartDashboard.ts",
     "train:bpe": "bun run Scripts/TrainBpeMerges.ts",
     "foundry": "bun run Scripts/RunFoundry.ts",
     "foundry:dashboard": "bun run Scripts/StartDashboard.ts",

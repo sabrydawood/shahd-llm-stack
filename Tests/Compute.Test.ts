@@ -88,11 +88,13 @@ test("routed backward gradients match the inline backward within f64 rounding", 
 });
 
 test("ActivateFromConfig honors the config and falls back to CPU when a backend is missing", () => {
-  const Default = ActivateFromConfig(LoadConfig({ UseCli: false, UseEnv: false }));
-  expect(Default.Chosen).toContain("Ts/F64");
-  expect(GetActiveBackend()).toBe(null); // default => inline
+  // Test backends EXPLICITLY (not via the default) so this stays portable regardless of which backend
+  // is the configured default and whether the Go FFI DLL is present on the CI machine.
+  const Ts = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "Ts" } }, UseCli: false, UseEnv: false }));
+  expect(Ts.Chosen).toContain("Ts/F64");
+  expect(GetActiveBackend()).toBe(null); // Ts f64 => inline
 
-  const F32 = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Precision: "F32" } }, UseCli: false, UseEnv: false }));
+  const F32 = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "Ts", Precision: "F32" } }, UseCli: false, UseEnv: false }));
   expect(F32.Chosen).toContain("F32");
   expect(GetActiveBackend()).not.toBe(null);
 

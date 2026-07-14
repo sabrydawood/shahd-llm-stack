@@ -7,6 +7,7 @@ import { LoadConfig } from "../Config/LoadConfig.ts";
 import { CreateRngStreams } from "../Random/SeededRng.ts";
 import type { RngStreams } from "../Random/SeededRng.ts";
 import { CharTokenizer } from "../Tokenizer/CharTokenizer.ts";
+import { BytePairEncoder } from "../Tokenizer/BytePairEncoder.ts";
 import type { Tokenizer } from "../Tokenizer/TokenizerTypes.ts";
 import { Shahd } from "../Nn/Shahd.ts";
 import { CreateOptimizer } from "../Optim/OptimBarrel.ts";
@@ -24,10 +25,22 @@ export function LoadRunnableModel(Path: string): RunnableModel {
   const Optimizer = CreateOptimizer(Model.Parameters(), Config);
   ApplyCheckpoint(Ckpt, Model, Optimizer, Rng);
 
-  const State = Ckpt.TokenizerState as { Kind: string; Chars: string[] } | null;
-  if (State === null || State.Kind !== "Char" || !Array.isArray(State.Chars)) {
-    throw new Error("LoadRunnableModel: checkpoint has no Char tokenizer state to rebuild from");
-  }
-  const Tokenizer = new CharTokenizer(State.Chars);
+  const Tokenizer = RebuildTokenizer(Ckpt.TokenizerState);
   return { Model, Tokenizer, Config, Rng };
+}
+
+// Rebuild the persisted tokenizer for SERVING. Char tokenizers are built Lenient (an unseen char is
+// substituted, never crashes the chat); byte-level BPE has a no-OOV guarantee so needs no leniency.
+type CharState = { Kind: "Char"; Chars: string[] };
+type BpeState = { Kind: "Bpe"; Merges: [number, number][] };
+
+function RebuildTokenizer(State: unknown): Tokenizer {
+  const S = State as CharState | BpeState | null;
+  if (S !== null && S.Kind === "Char" && Array.isArray(S.Chars)) {
+    return new CharTokenizer(S.Chars, { Lenient: true });
+  }
+  if (S !== null && S.Kind === "Bpe" && Array.isArray(S.Merges)) {
+    return new BytePairEncoder({ Merges: S.Merges });
+  }
+  throw new Error("LoadRunnableModel: checkpoint has no rebuildable tokenizer state (Char or Bpe)");
 }

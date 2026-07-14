@@ -8,6 +8,7 @@ import type { ResolvedConfig } from "../Config/ConfigTypes.ts";
 import { GuardedGenerate } from "../Safety/GuardedGenerate.ts";
 import { DefaultSampling } from "../Sampling/Sampler.ts";
 import { SeededRng } from "../Random/SeededRng.ts";
+import { RenderMessages } from "./RenderChat.ts";
 
 type ChatRequest = {
   messages?: { role: string; content: string }[];
@@ -15,10 +16,6 @@ type ChatRequest = {
   temperature?: number;
   stream?: boolean;
 };
-
-function RenderMessages(Messages: { role: string; content: string }[]): string {
-  return Messages.map((M) => `${M.role}: ${M.content}`).join("\n") + "\nassistant:";
-}
 
 export type ChatHandler = (Req: Request) => Promise<Response>;
 

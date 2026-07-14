@@ -82,24 +82,46 @@ export function CreateDashboardHandler(Store: DocumentStore, Learn?: LearnFn): D
     }
 
     if (Path === "/api/learn/stream") {
+      let Listener: ((Event: LearnEvent) => void) | null = null;
+      const Drop = (): void => {
+        if (Listener !== null) {
+          Job.Listeners.delete(Listener);
+          Listener = null;
+        }
+      };
       const Stream = new ReadableStream<Uint8Array>({
         start: (Controller: ReadableStreamDefaultController<Uint8Array>): void => {
           const Encoder = new TextEncoder();
-          const Send = (Event: LearnEvent): void => Controller.enqueue(Encoder.encode(`data: ${JSON.stringify(Event)}\n\n`));
+          let Closed = false;
+          const End = (): void => {
+            Closed = true;
+            Drop();
+            try {
+              Controller.close();
+            } catch {
+              // already closed (idle timeout / client disconnect) — ignore
+            }
+          };
+          const Send = (Event: LearnEvent): void => {
+            if (Closed) return;
+            try {
+              Controller.enqueue(Encoder.encode(`data: ${JSON.stringify(Event)}\n\n`));
+            } catch {
+              End(); // the connection was closed underneath us — stop listening so Emit never throws
+            }
+          };
           for (const Event of Job.Events) Send(Event);
           if (!Job.Running) {
-            Controller.close();
+            End();
             return;
           }
-          const Listener = (Event: LearnEvent): void => {
+          Listener = (Event: LearnEvent): void => {
             Send(Event);
-            if (Event.kind === "done" || Event.kind === "error") {
-              Job.Listeners.delete(Listener);
-              Controller.close();
-            }
+            if (Event.kind === "done" || Event.kind === "error") End();
           };
           Job.Listeners.add(Listener);
         },
+        cancel: Drop, // client disconnected — remove the listener
       });
       return new Response(Stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
     }
@@ -109,5 +131,7 @@ export function CreateDashboardHandler(Store: DocumentStore, Learn?: LearnFn): D
 }
 
 export function StartDashboard(Store: DocumentStore, Port = 8090, Learn?: LearnFn): ReturnType<typeof Bun.serve> {
-  return Bun.serve({ port: Port, fetch: CreateDashboardHandler(Store, Learn) });
+  // idleTimeout 0 disables Bun's 10s request timeout, which would otherwise kill a long-lived SSE
+  // stream mid-learn (a whole-repo ingest can take much longer than 10s).
+  return Bun.serve({ port: Port, idleTimeout: 0, fetch: CreateDashboardHandler(Store, Learn) });
 }

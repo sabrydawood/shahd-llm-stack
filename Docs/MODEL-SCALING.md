@@ -32,6 +32,34 @@ Training memory ≈ 4× the weights (weights + gradients + optimizer m/v), plus 
 compute path is Float64 (8 bytes), which **doubles** memory; large tiers require switching to Float32 /
 mixed precision (`Compute.Precision: "F32"`) and a GPU backend.
 
+### How many steps? (steps vs tokens)
+
+`Steps` (the dashboard knob) is **not** a fixed property of a model size — it depends on batch and
+context. The real measure of "how much training" is **tokens seen**:
+
+```
+tokens seen = steps × batch × context
+steps       = tokens ÷ (batch × context)
+```
+
+A useful floor is the Chinchilla compute-optimal budget, ~20 tokens per parameter (real models train
+5–20× more). Below is that **minimum** for each tier, converted to steps at the dashboard's default
+batch (16) and each tier's context — treat these as a lower bound, not a target:
+
+| Tier | Params | Min tokens (~20×) | Min steps (batch 16) |
+| ----- | ------ | ----------------- | -------------------- |
+| Seed  | 0.49M  | ~10M   | ~6,000   |
+| Nano  | 1.1M   | ~22M   | ~5,000   |
+| Micro | 6.6M   | ~130M  | ~16,000  |
+| Mini  | 36M    | ~720M  | ~44,000  |
+| Small | 126M   | ~2.5B  | ~77,000  |
+| Base  | 435M   | ~8.7B  | ~130,000 |
+| Large | 2.25B  | ~45B   | ~340,000 |
+
+The step counts explode because token budget grows with parameters while a small CPU batch stays
+tiny — this is exactly why the larger tiers need a GPU (big batches cut the step count, and each step
+runs far faster). On CPU, only Seed/Nano reach a useful step count in reasonable time.
+
 ---
 
 ## 2. Real-world large models

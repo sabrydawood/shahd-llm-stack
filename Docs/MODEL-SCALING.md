@@ -16,51 +16,36 @@ Three things are always separate — never one file:
 ## 1. The in-repo model family
 
 Parameter counts verified by building each config: `params ≈ (Vocab × Embed) + 16 × Layers × Embed²`.
-Head dimension is 64 (standard) except the two smallest tiers. **Steps** is the minimum to reach the
-Chinchilla ~20-tokens/param floor at the dashboard's default batch (16) and each tier's context —
-a lower bound; real training uses several times more (`steps = tokens ÷ (batch × context)`).
+Head dimension is 64 (standard) except the two smallest tiers. **The columns match the dashboard Train
+panel exactly**, so each row is a ready preset. `Batch` and `Steps` are the Chinchilla ~20-tokens/param
+**floor** (`steps = tokens ÷ (batch × context)`) — a lower bound; real training uses several times
+more. `Corpus MB` is a practical starting size — we currently have ~60 MB collected, so the larger
+tiers need much more data (see §2).
 
-| Tier | Embed | Layers | Heads | Context | Vocab | Params | Steps (min) | Trains on | Comparable to |
-|------|-------|--------|-------|---------|-------|--------|-------------|-----------|---------------|
-| Seed | 96 | 3 | 4 | 96 | 512 | 0.49M | ~6,000 | CPU (minutes) | toy |
-| Nano | 128 | 4 | 4 | 256 | 512 | 1.1M | ~5,000 | CPU (minutes) | experiment |
-| Micro | 256 | 6 | 4 | 512 | 1,024 | 6.6M | ~16,000 | CPU (~1 hr) | tiny |
-| Mini | 512 | 8 | 8 | 1,024 | 4,096 | 36M | ~44,000 | small GPU | GPT-2 nano |
-| Small | 768 | 12 | 12 | 2,048 | 16,384 | 126M | ~77,000 | 8–12 GB GPU | ≈ GPT-2 small (124M) |
-| Base | 1,024 | 24 | 16 | 4,096 | 32,000 | 435M | ~130,000 | 16–24 GB GPU | ≈ GPT-2 medium/large |
-| Large | 2,048 | 32 | 32 | 8,192 | 50,000 | 2.25B | ~340,000 | 40–80 GB GPU | ≈ a small modern LLM |
+| Tier | Embed | Layers | Heads | Context | Vocab | Batch | Steps | Corpus MB | Params | Trains on |
+|------|-------|--------|-------|---------|-------|-------|-------|-----------|--------|-----------|
+| Seed | 96 | 3 | 4 | 96 | 512 | 16 | ~6,000 | 2 | 0.49M | CPU |
+| Nano | 128 | 4 | 4 | 256 | 512 | 16 | ~5,000 | 3 | 1.1M | CPU |
+| Micro | 256 | 6 | 4 | 512 | 1,024 | 16 | ~16,000 | 8 | 6.6M | CPU (slow) |
+| Mini | 512 | 8 | 8 | 1,024 | 4,096 | 32 | ~22,000 | 30 | 36M | small GPU |
+| Small | 768 | 12 | 12 | 2,048 | 16,384 | 64 | ~19,000 | 80 | 126M | 8–12 GB GPU |
+| Base | 1,024 | 24 | 16 | 4,096 | 32,000 | 128 | ~17,000 | 200 | 435M | 16–24 GB GPU |
+| Large | 2,048 | 32 | 32 | 8,192 | 50,000 | 256 | ~22,000 | 500 | 2.25B | 40–80 GB GPU |
+
+Rough equivalents by size: Small ≈ GPT-2 small (124M), Base ≈ GPT-2 medium/large, Large ≈ a small
+modern LLM.
 
 Training memory ≈ 4× the weights (weights + gradients + optimizer m/v), plus activations. The current
 compute path is Float64 (8 bytes), which **doubles** memory; large tiers require switching to Float32 /
-mixed precision (`Compute.Precision: "F32"`) an### How many steps? (steps vs tokens)
+mixed precision (`Compute.Precision: "F32"`) and a GPU backend.
 
-`Steps` (the dashboard knob) is **not** a fixed property of a model size — it depends on batch and
-context. The real measure of "how much training" is **tokens seen**:
+### Steps vs tokens
 
-```
-tokens seen = steps × batch × context
-steps       = tokens ÷ (batch × context)
-```
-
-A useful floor is the Chinchilla compute-optimal budget, ~20 tokens per parameter (real models train
-5–20× more). Below is that **minimum** for each tier, converted to steps at the dashboard's default
-batch (16) and each tier's context — treat these as a lower bound, not a target:
-
-| Tier | Params | Min tokens (~20×) | Min steps (batch 16) |
-| ----- | ------ | ----------------- | -------------------- |
-| Seed  | 0.49M  | ~10M   | ~6,000   |
-| Nano  | 1.1M   | ~22M   | ~5,000   |
-| Micro | 6.6M   | ~130M  | ~16,000  |
-| Mini  | 36M    | ~720M  | ~44,000  |
-| Small | 126M   | ~2.5B  | ~77,000  |
-| Base  | 435M   | ~8.7B  | ~130,000 |
-| Large | 2.25B  | ~45B   | ~340,000 |
-
-The step counts explode because token budget grows with parameters while a small CPU batch stays
-tiny — this is exactly why the larger tiers need a GPU (big batches cut the step count, and each step
-runs far faster). On CPU, only Seed/Nano reach a useful step count in reasonable time.
-
-d a GPU backend.
+`Steps` is not intrinsic to a model — it is `tokens ÷ (batch × context)`, and the real measure of "how
+much training" is tokens seen (`steps × batch × context`). The table's Steps are the Chinchilla minimum
+(~20 tokens/param) at each tier's batch. The step counts stay modest for the big tiers only because
+their batch is large — at a tiny CPU batch the same token budget needs 10–20× more steps, which is
+exactly why the larger tiers need a GPU: big batches cut the step count and each step runs far faster.
 
 ---
 
@@ -108,7 +93,8 @@ Example for a 7B-class model (32 layers, hidden 4096, FP16). With standard multi
 | 128k | 64 GB | 16 GB | 8 GB |
 | 256k | 128 GB | 32 GB | 16 GB |
 | 1M | 512 GB | 128 GB | 64 GB |
-antization**,**paged
+
+This is why long-context models rely on **GQA** (fewer KV heads), **KV-cache quantization**, **paged
 attention**, and **sliding-window / sparse attention** — otherwise a single 1M-token request would need
 more memory than the model weights themselves.
 
@@ -120,8 +106,8 @@ more memory than the model weights themselves.
 Weights (inference)   = bytes-per-param × params          (FP16 = 2 B, INT4 ≈ 0.5 B)
 Training state memory ≈ 16–18 bytes × params              (weights + grads + Adam + master)
 Compute-optimal data  ≈ 20 tokens per parameter           (Chinchilla; modern models use much more)
+Tokens seen           = steps × batch × context           (steps = tokens ÷ (batch × context))
 Capacity (smartness)  = width (embed) × depth (layers)    → needs GPU beyond ~100M params
-Training amount        = steps × corpus                    → needs time (and compute)
 Long-context cost      = KV-cache, not weights             → mitigated by GQA + quantization
 ```
 

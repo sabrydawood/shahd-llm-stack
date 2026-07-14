@@ -93,19 +93,20 @@ if (Measure) {
   process.exit(0);
 }
 
-// Build the checkpoint once, then persist it: Postgres (durable, source of truth) when DATABASE_URL
-// is set, plus a local file cache for fast dashboard load.
+// Persist the model to Postgres (the single store) when DATABASE_URL is set — no file, so the corpus,
+// chat memory, AND model weights all live in one place. Only when there is NO database do we fall back
+// to a checkpoint file.
 const Ckpt = BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: Config.Schedule.MaxSteps, Corpus: "foundry-filtered" }, { Kind: "Bpe", Merges: Bpe.Merges });
-WriteCheckpointObject(SavePath, Ckpt);
 const CkptName = ReadArg("--Name=", "foundry");
 const DbUrl = process.env["DATABASE_URL"];
 if (DbUrl !== undefined && DbUrl !== "") {
   const Store2 = new PostgresCheckpointStore(DbUrl);
   await Store2.Save(CkptName, Ckpt, new Date().toISOString());
   await Store2.Close();
-  console.log(`saved ${SavePath} + Postgres checkpoint "${CkptName}"`);
+  console.log(`saved to Postgres checkpoint "${CkptName}" (no file — Postgres is the store)`);
 } else {
-  console.log(`saved ${SavePath}`);
+  WriteCheckpointObject(SavePath, Ckpt);
+  console.log(`saved ${SavePath} (no DATABASE_URL — file store)`);
 }
 
 const Sample = Generate(Model, Tokenizer.Encode("export function "), 160, { ...DefaultSampling, Temperature: 0.7 }, Rng.SamplingRng);

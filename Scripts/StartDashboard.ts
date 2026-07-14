@@ -28,7 +28,7 @@ import { existsSync } from "node:fs";
 
 const { Store, Kind } = ResolveStore();
 const DbUrl = process.env["DATABASE_URL"];
-const CkptName = process.env["FOUNDRY_CHECKPOINT_NAME"] ?? "foundry";
+const CkptName = process.env["FOUNDRY_CHECKPOINT_NAME"] ?? "Seed";
 
 // Mutable model state — swapped in place when a training run finishes or the user picks a saved model.
 type ModelState = { Runnable: RunnableModel | null; Info: ModelInfo | null; Source: string; Name: string };
@@ -230,7 +230,7 @@ const Train: TrainFn = async (Settings, OnEvent, Signal) => {
   else OnEvent({ kind: "train-error", message: `trainer exited with code ${Code} (see server console)` });
 };
 
-await ReloadModel();
+await ReloadModel("Seed");
 
 const Port = Number(ReadArg("--Port=", "8090"));
 StartDashboard(Store, Port, Learn, {

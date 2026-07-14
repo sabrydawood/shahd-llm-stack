@@ -8,7 +8,7 @@ import {
 } from "../Foundry/FoundryBarrel.ts";
 import type { HttpJson, SearchBackend, PageFetch } from "../Foundry/FoundryBarrel.ts";
 import { IsSubstantiveCodePath, IsSubstantiveCodeContent } from "../Foundry/CodeFileFilter.ts";
-import { StripLicenseHeader } from "../Foundry/ContentNormalizer.ts";
+import { StripLicenseHeader, SanitizeText } from "../Foundry/ContentNormalizer.ts";
 
 // A substantive code file (passes the content gate); the tiny stub the old test used would now be
 // correctly rejected as too small.
@@ -91,6 +91,15 @@ test("StripLicenseHeader drops the license banner but keeps code + comments", ()
   // a leading NON-license comment (a docstring) is preserved untouched
   const Doc = "// This module parses configuration files.\nexport function parse() {}\n";
   expect(StripLicenseHeader(Doc)).toBe(Doc);
+});
+
+test("SanitizeText drops NUL and lone surrogates (Postgres-unstorable) but keeps valid text", () => {
+  expect(SanitizeText("a" + String.fromCharCode(0) + "b")).toBe("ab"); // NUL removed
+  const LoneHigh = "x" + String.fromCharCode(0xd800) + "y";
+  expect(SanitizeText(LoneHigh)).toBe("x" + String.fromCharCode(0xfffd) + "y"); // lone surrogate -> U+FFFD
+  const Emoji = "z" + String.fromCharCode(0xd83d, 0xde00) + "w"; // valid surrogate pair (😀)
+  expect(SanitizeText(Emoji)).toBe(Emoji); // real astral char preserved
+  expect(SanitizeText("plain code();")).toBe("plain code();"); // ordinary text untouched
 });
 
 test("HtmlToText strips tags, script/style, and entities", () => {

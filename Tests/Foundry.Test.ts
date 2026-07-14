@@ -9,7 +9,7 @@ import {
   BuildReport,
   RenderReportText,
 } from "../Foundry/FoundryBarrel.ts";
-import type { SourceInput } from "../Foundry/FoundryBarrel.ts";
+import type { SourceInput, DocumentRecord } from "../Foundry/FoundryBarrel.ts";
 
 const Clean = "export function add(a, b) {\n  return a + b;\n}\n";
 const GoSnippet = "package main\n\nfunc Max(a, b int) int {\n\tif a > b {\n\t\treturn a\n\t}\n\treturn b\n}\n";
@@ -76,6 +76,29 @@ test("dedup by content hash: re-ingesting identical content does not duplicate",
   const One: SourceInput = { Source: "s", License: "MIT", Lang: "ts", Content: Clean, Provenance: "a.ts", Origin: "local" };
   await IngestDocuments([One, One], Store, "2026-07-13T00:00:00.000Z");
   expect(await Store.Count()).toBe(1);
+});
+
+test("ingest is resilient: one failing Upsert doesn't abort the batch", async () => {
+  // A store that rejects the 2nd row (mimics Postgres refusing an unstorable value): the run must
+  // continue and report the failure, not throw and lose the other rows.
+  class FlakyStore extends InMemoryDocumentStore {
+    Calls = 0;
+    override async Upsert(Doc: DocumentRecord): Promise<void> {
+      this.Calls++;
+      if (this.Calls === 2) throw new Error("simulated store failure");
+      await super.Upsert(Doc);
+    }
+  }
+  const Store = new FlakyStore();
+  const Inputs: SourceInput[] = [
+    { Source: "s", License: "MIT", Lang: "ts", Content: Clean, Provenance: "a.ts", Origin: "local" },
+    { Source: "s", License: "MIT", Lang: "go", Content: GoSnippet, Provenance: "b.go", Origin: "local" },
+    { Source: "s", License: "MIT", Lang: "c", Content: CSnippet, Provenance: "c.c", Origin: "local" },
+  ];
+  const Stats = await IngestDocuments(Inputs, Store, "2026-07-13T00:00:00.000Z");
+  expect(Stats.Ingested).toBe(2);
+  expect(Stats.Failed).toBe(1);
+  expect(await Store.Count()).toBe(2);
 });
 
 test("provenance-aware dedup: identical content from different origins coexist (no tier clobber)", async () => {

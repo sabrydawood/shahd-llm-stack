@@ -132,16 +132,16 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
   Q('lics').innerHTML='<b>licenses</b> '+kv(s.ByLicense);
  }
 
- var maxRepos=5, seen=0, ingested=0, files=0, bytes=0, running=false;
+ var maxRepos=5, seen=0, ingested=0, skipped=0, files=0, bytes=0, running=false;
  var ts=function(){return new Date().toTimeString().slice(0,8);};
  function line(t,c){var log=Q('log');var d=document.createElement('div');if(c)d.className=c;d.innerHTML='<span class="t">'+ts()+'</span>  '+H(t);log.appendChild(d);log.scrollTop=log.scrollHeight;}
  function setOverall(f,txt){Q('ofill').style.width=Math.max(0,Math.min(1,f))*100+'%';Q('olab').textContent=txt;}
  function setRepo(f,repo,txt){Q('rfill').style.width=Math.max(0,Math.min(1,f))*100+'%';Q('rrepo').textContent=repo;Q('rlab').textContent=txt;}
  function onLearn(e){
-  if(e.kind==='start'){if(e.repos)maxRepos=e.repos;seen=0;ingested=0;files=0;bytes=0;running=true;Q('go').disabled=true;Q('log').innerHTML='';line('▶ learning from '+e.source+' ('+(e.query||'own repos')+')');setOverall(.02,'0 / '+maxRepos+' repos');setRepo(0,'current repo','');}
-  else if(e.kind==='repo'){seen++;if(e.ingested){ingested++;files+=e.files;bytes+=e.bytes;}line((e.ingested?'✓ ':'· ')+e.repo+'  ['+e.level+', '+e.files+' files, '+fmtB(e.bytes)+']'+(e.ingested?' INGESTED':' skipped'+(e.reason?' ('+e.reason+')':'')),e.ingested?'ok':'skip');setOverall(seen/maxRepos,seen+' / '+maxRepos+' repos · '+ingested+' ingested · '+files+' files · '+fmtB(bytes));}
+  if(e.kind==='start'){if(e.repos)maxRepos=e.repos;seen=0;ingested=0;skipped=0;files=0;bytes=0;running=true;Q('go').disabled=true;Q('log').innerHTML='';line('▶ learning from '+e.source+' ('+(e.query||'own repos')+')');setOverall(.02,'0 / '+maxRepos+' repos');setRepo(0,'current repo','');}
+  else if(e.kind==='repo'){seen++;if(e.ingested){ingested++;files+=e.files;bytes+=e.bytes;}else{skipped++;}line((e.ingested?'✓ ':'· ')+e.repo+'  ['+e.level+', '+e.files+' files, '+fmtB(e.bytes)+']'+(e.ingested?' INGESTED':' skipped'+(e.reason?' ('+e.reason+')':'')),e.ingested?'ok':'skip');setOverall(seen/maxRepos,seen+' / '+maxRepos+' repos · '+ingested+' ingested · '+skipped+' skipped · '+files+' files');}
   else if(e.kind==='repo-progress'){setRepo(e.filesTotal?e.filesDone/e.filesTotal:0,'ingesting '+e.repo,e.filesDone+' / '+e.filesTotal+' files');}
-  else if(e.kind==='done'){running=false;Q('go').disabled=false;setOverall(1,'done · '+ingested+' repos · '+e.ingested+' files');setRepo(1,'current repo','complete');line('done — '+e.ingested+' files ingested from '+ingested+' repos','ok');loadRepos();}
+  else if(e.kind==='done'){running=false;Q('go').disabled=false;setOverall(1,'done · '+ingested+' ingested · '+skipped+' skipped · '+e.ingested+' files');setRepo(1,'current repo','complete');line('done — '+e.ingested+' files ingested from '+ingested+' repos ('+skipped+' skipped — already learned)',e.ingested?'ok':'skip');if(e.ingested===0)line('⚠ 0 new files: every matching repo is already learned. Try a different query (other language/topic/star range) or uncheck "Skip repos already learned".','skip');loadRepos();}
   else if(e.kind==='error'){running=false;Q('go').disabled=false;setOverall(seen/maxRepos,'error');line('error: '+e.message,'err');}
  }
  function learn(){

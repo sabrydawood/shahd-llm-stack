@@ -27,7 +27,9 @@ const { Store, Kind } = ResolveStore();
 // Best-effort: load a checkpoint so the /chat page works (streaming + persistent memory). If none
 // exists (or loading fails), the dashboard still serves and chat reports "no model loaded".
 function LoadChat(): { Chat?: ChatService; Model: ModelInfo | null; Note: string } {
-  const Path = process.env["FOUNDRY_CHECKPOINT"] ?? ReadArg("--Checkpoint=", "Checkpoints/Corpus.ckpt");
+  // Prefer the byte-level Foundry model (full char coverage, code-trained) over the seed checkpoint.
+  const Default = existsSync("Checkpoints/Foundry.ckpt") ? "Checkpoints/Foundry.ckpt" : "Checkpoints/Corpus.ckpt";
+  const Path = process.env["FOUNDRY_CHECKPOINT"] ?? ReadArg("--Checkpoint=", Default);
   if (!existsSync(Path)) return { Model: null, Note: `no checkpoint at ${Path} (chat disabled)` };
   try {
     const { Model, Tokenizer, Config } = LoadRunnableModel(Path);

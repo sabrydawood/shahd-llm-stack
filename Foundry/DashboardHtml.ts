@@ -62,7 +62,7 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
 <div class="wrap">
  <div class="info">
   <div class="panel"><h2>System <span id="systick" class="badge"></span></h2><div id="sys">connecting…</div></div>
-  <div class="panel"><h2>Model <span style="text-transform:none;color:var(--mut)">loaded checkpoint</span></h2><div id="model">no model</div></div>
+  <div class="panel"><h2>Model <span style="text-transform:none;color:var(--mut)">loaded checkpoint</span></h2><div id="ckptsel"></div><div id="model">no model</div></div>
   <div class="panel"><h2>Foundry stats</h2><div class="cards" id="cards"></div><div class="chips" id="langs"></div></div>
  </div>
  <div class="pipes">
@@ -84,10 +84,12 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
   </div>
   <div class="panel stage train">
    <h2>② Train Model <span class="badge" id="tbadge">idle</span></h2>
+   <label>Model name <span style="color:var(--mut)">— train/keep several side by side</span></label><input id="tname" value="foundry">
+   <div class="row"><div><label>Embed dim</label><input id="tembed" type="number" value="96"></div><div><label>Layers</label><input id="tlayers" type="number" value="3"></div><div><label>Heads</label><input id="theads" type="number" value="4"></div></div>
+   <div class="row"><div><label>Context</label><input id="tctx" type="number" value="96"></div><div><label>Vocab</label><input id="tvocab" type="number" value="512"></div><div><label>Batch</label><input id="tbatch" type="number" value="16"></div></div>
    <div class="row"><div><label>Steps</label><input id="tsteps" type="number" value="500"></div><div><label>Corpus MB</label><input id="tcorpus" type="number" step="0.5" value="1.5"></div></div>
-   <div class="row"><div><label>Embed dim</label><input id="tembed" type="number" value="96"></div><div><label>Layers</label><input id="tlayers" type="number" value="3"></div></div>
    <button class="train" id="tgo" onclick="tbtn()">▶ Train Model</button>
-   <div class="hint">Trains a byte-level model on the collected corpus, then loads it into Chat. Bigger dim/layers/steps = better but slower (CPU).</div>
+   <div class="hint">Trains a byte-level model on the collected corpus, then loads it into Chat. Heads must divide Embed. Re-running the same name resumes; a new name trains a separate model. See Docs/MODEL-SCALING.md for tier presets.</div>
    <div class="plabel" style="margin-top:11px"><span id="tstep">step</span><span id="tloss"></span></div>
    <div class="pbar"><div class="pfill tr" id="tfill"></div></div>
    <div class="log" id="tlog"></div>
@@ -106,7 +108,7 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
  var badge=function(id,txt,cls){var b=Q(id);b.textContent=txt;b.className='badge'+(cls?' '+cls:'');};
  var logLine=function(el,t,c){var d=document.createElement('div');if(c)d.className=c;d.innerHTML='<span class="t">'+new Date().toTimeString().slice(0,8)+'</span>  '+H(t);el.appendChild(d);el.scrollTop=el.scrollHeight;};
  Q('source').onchange=function(e){var v=e.target.value;Q('ghbox').style.display=v==='local'?'none':'';Q('localbox').style.display=v==='github'?'none':'';};
- var FIELDS=['source','query','repos','minlevel','maxrepos','maxfiles','maxmb','maxkb','skip','tsteps','tcorpus','tembed','tlayers'];
+ var FIELDS=['source','query','repos','minlevel','maxrepos','maxfiles','maxmb','maxkb','skip','tname','tsteps','tcorpus','tembed','tlayers','theads','tctx','tvocab','tbatch'];
  function saveSettings(){var o={};FIELDS.forEach(function(id){var el=Q(id);o[id]=el.type==='checkbox'?el.checked:el.value;});try{localStorage.setItem('shahd.cfg',JSON.stringify(o));}catch(e){}}
  function restoreSettings(){try{var o=JSON.parse(localStorage.getItem('shahd.cfg')||'{}');FIELDS.forEach(function(id){if(o[id]===undefined)return;var el=Q(id);if(el.type==='checkbox')el.checked=!!o[id];else el.value=o[id];});Q('source').dispatchEvent(new Event('change'));}catch(e){}}
 
@@ -168,7 +170,12 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
   else if(e.kind==='train-done'){training=false;setBtn('tgo','idle');badge('tbadge','done','ok');setTrain(1,'complete',Q('tloss').textContent);logLine(log,'✓ trained + saved to '+e.savedTo+' — model reloaded into Chat','ok');}
   else if(e.kind==='train-error'){training=false;setBtn('tgo','idle');var stopped=e.message.indexOf('stop')>=0;badge('tbadge',stopped?'stopped':'error',stopped?'skip':'err');logLine(log,(stopped?'■ ':'error: ')+e.message,stopped?'skip':'err');}
  }
- function train(){saveSettings();var s={Steps:+Q('tsteps').value,CorpusMb:+Q('tcorpus').value,EmbedDim:+Q('tembed').value,NumLayers:+Q('tlayers').value};if(WS&&WS.readyState===1)WS.send(JSON.stringify({type:'train',settings:s}));else logLine(Q('tlog'),'not connected','err');}
+ function train(){saveSettings();var s={Name:Q('tname').value,Steps:+Q('tsteps').value,CorpusMb:+Q('tcorpus').value,EmbedDim:+Q('tembed').value,NumLayers:+Q('tlayers').value,NumHeads:+Q('theads').value,BlockSize:+Q('tctx').value,Merges:Math.max(0,(+Q('tvocab').value)-256),BatchSize:+Q('tbatch').value};if(WS&&WS.readyState===1)WS.send(JSON.stringify({type:'train',settings:s}));else logLine(Q('tlog'),'not connected','err');}
+ // ── chat-model picker ──
+ var loadedName='';
+ function renderCheckpoints(list){if(!list||!list.length){Q('ckptsel').innerHTML='';return;}var opts=list.map(function(c){return '<option value="'+H(c.Name)+'"'+(c.Name===loadedName?' selected':'')+'>'+H(c.Name)+' — '+fmtN(c.Params)+'p · '+H(c.Arch)+'</option>';}).join('');Q('ckptsel').innerHTML='<label style="margin:0 0 3px">chat model ('+list.length+' saved — pick to switch)</label><select id="ckptdd" onchange="loadModel(this.value)" style="margin-bottom:9px">'+opts+'</select>';}
+ function syncCkptSel(){var dd=Q('ckptdd');if(dd&&loadedName)dd.value=loadedName;}
+ function loadModel(name){if(WS&&WS.readyState===1)WS.send(JSON.stringify({type:'load-model',name:name}));}
 
  // ── repos + file viewer ──
  async function loadRepos(){var r=await (await fetch('/api/repos')).json();Q('repos-list').innerHTML=r.length?r.map(function(x){return '<div class="acc"><div class="h" onclick="openRepo(this,'+JSON.stringify(H(x.Source)).replace(/"/g,'&quot;')+')"><span>'+H(x.Source)+'</span><span class="r">'+x.Files+' files · '+fmtB(x.Bytes)+'</span></div><div class="b"></div></div>';}).join(''):'<div style="color:var(--mut)">nothing collected yet.</div>';}
@@ -184,7 +191,8 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
   WS.onclose=function(){Q('dot').className='dot';Q('livetxt').textContent='reconnecting…';setTimeout(connect,2000);};
   WS.onmessage=function(ev){var m=JSON.parse(ev.data);
    if(m.type==='system')renderSystem(m.data);
-   else if(m.type==='model')renderModel(m.data);
+   else if(m.type==='model'){if(m.name)loadedName=m.name;renderModel(m.data);syncCkptSel();}
+   else if(m.type==='checkpoints')renderCheckpoints(m.data);
    else if(m.type==='stats')renderStats(m.data);
    else if(m.type==='learn')onLearn(m.event);
    else if(m.type==='train')onTrain(m.event);

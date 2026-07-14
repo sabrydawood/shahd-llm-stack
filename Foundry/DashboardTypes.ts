@@ -29,10 +29,15 @@ export type LearnFn = (Settings: LearnSettings, OnEvent: (Event: LearnEvent) => 
 // Model TRAINING (distinct from Learn/data-collection): turn the collected Postgres corpus into a
 // trained model checkpoint. Runs as a subprocess so it never blocks the dashboard event loop.
 export type TrainSettings = {
+  Name: string; // checkpoint name — train/keep multiple models side by side
   Steps: number;
   CorpusMb: number;
   EmbedDim: number;
   NumLayers: number;
+  NumHeads: number;
+  BlockSize: number;
+  Merges: number; // vocab = 256 + Merges
+  BatchSize: number;
 };
 
 export type TrainEvent =

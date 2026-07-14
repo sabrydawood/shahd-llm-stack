@@ -15,6 +15,7 @@ import type { ChatStreamFn } from "../Foundry/ChatService.ts";
 import { DescribeModel } from "../Foundry/ModelInfo.ts";
 import type { ModelInfo } from "../Foundry/ModelInfo.ts";
 import { PostgresCheckpointStore } from "../Foundry/PostgresCheckpointStore.ts";
+import type { CheckpointSummary } from "../Foundry/PostgresCheckpointStore.ts";
 import { LoadRunnableModel, LoadRunnableModelFrom } from "../Brain/Checkpoint/LoadRunnableModel.ts";
 import type { RunnableModel } from "../Brain/Checkpoint/LoadRunnableModel.ts";
 import { GuardedGenerateStream } from "../Brain/Safety/GuardedGenerate.ts";
@@ -29,21 +30,23 @@ const { Store, Kind } = ResolveStore();
 const DbUrl = process.env["DATABASE_URL"];
 const CkptName = process.env["FOUNDRY_CHECKPOINT_NAME"] ?? "foundry";
 
-// Mutable model state — swapped in place when a training run finishes (no restart).
-type ModelState = { Runnable: RunnableModel | null; Info: ModelInfo | null; Source: string };
-const ModelHolder: ModelState = { Runnable: null, Info: null, Source: "none" };
+// Mutable model state — swapped in place when a training run finishes or the user picks a saved model.
+type ModelState = { Runnable: RunnableModel | null; Info: ModelInfo | null; Source: string; Name: string };
+const ModelHolder: ModelState = { Runnable: null, Info: null, Source: "none", Name: CkptName };
 
-// Load the chat model: Postgres checkpoint first (durable/synced), then a local file fallback.
-async function ReloadModel(): Promise<void> {
+// Load a checkpoint (by name) as the live chat model: Postgres first (durable/synced), then a file
+// fallback for the default name only.
+async function ReloadModel(Name: string = ModelHolder.Name): Promise<void> {
+  ModelHolder.Name = Name;
   if (DbUrl !== undefined && DbUrl !== "") {
     try {
       const CkptStore = new PostgresCheckpointStore(DbUrl);
-      const Ckpt = await CkptStore.Load(CkptName);
+      const Ckpt = await CkptStore.Load(Name);
       await CkptStore.Close();
       if (Ckpt !== null) {
         ModelHolder.Runnable = LoadRunnableModelFrom(Ckpt);
         ModelHolder.Info = DescribeModel(ModelHolder.Runnable.Model);
-        ModelHolder.Source = `postgres:${CkptName}`;
+        ModelHolder.Source = `postgres:${Name}`;
         return;
       }
     } catch {
@@ -60,6 +63,19 @@ async function ReloadModel(): Promise<void> {
   ModelHolder.Runnable = null;
   ModelHolder.Info = null;
   ModelHolder.Source = "none";
+}
+
+// List saved checkpoints (the chat-model picker).
+async function ListCheckpoints(): Promise<CheckpointSummary[]> {
+  if (DbUrl === undefined || DbUrl === "") return [];
+  try {
+    const CkptStore = new PostgresCheckpointStore(DbUrl);
+    const List = await CkptStore.List();
+    await CkptStore.Close();
+    return List;
+  } catch {
+    return [];
+  }
 }
 
 // Chat generation reads the CURRENT model from the holder, so a post-training reload takes effect
@@ -163,7 +179,13 @@ const ParseTrainLine = (Line: string, Settings: TrainSettings, OnEvent: (Event: 
 
 const Train: TrainFn = async (Settings, OnEvent, Signal) => {
   const Proc = Bun.spawn(
-    ["bun", "run", "Scripts/TrainOnFoundry.ts", `--Steps=${Settings.Steps}`, `--CorpusMb=${Settings.CorpusMb}`, `--EmbedDim=${Settings.EmbedDim}`, `--Layers=${Settings.NumLayers}`, `--Name=${CkptName}`],
+    [
+      "bun", "run", "Scripts/TrainOnFoundry.ts",
+      `--Steps=${Settings.Steps}`, `--CorpusMb=${Settings.CorpusMb}`,
+      `--EmbedDim=${Settings.EmbedDim}`, `--Layers=${Settings.NumLayers}`, `--Heads=${Settings.NumHeads}`,
+      `--Block=${Settings.BlockSize}`, `--Merges=${Settings.Merges}`, `--Batch=${Settings.BatchSize}`,
+      `--Name=${Settings.Name}`,
+    ],
     { stdout: "pipe", stderr: "pipe", env: { ...process.env } },
   );
   const OnAbort = (): void => {
@@ -204,8 +226,11 @@ const Port = Number(ReadArg("--Port=", "8090"));
 StartDashboard(Store, Port, Learn, {
   Chat,
   GetModel: () => ModelHolder.Info,
+  GetModelName: () => ModelHolder.Name,
   Train,
-  OnTrained: ReloadModel,
+  OnTrained: (Name: string) => ReloadModel(Name),
+  Checkpoints: ListCheckpoints,
+  LoadModel: (Name: string) => ReloadModel(Name),
 });
 console.log(`Foundry control panel: http://localhost:${Port}  (store=${Kind}, ${await Store.Count()} docs, GitHub token: ${GitHubToken() ? "yes" : "no"})`);
 console.log(`  chat model: ${ModelHolder.Source} (memory: ${DbUrl ? "postgres" : "in-memory"})`);

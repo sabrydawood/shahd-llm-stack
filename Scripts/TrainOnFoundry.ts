@@ -31,6 +31,7 @@ const CorpusMb = Number(ReadArg("--CorpusMb=", "3"));
 const NumMerges = Number(ReadArg("--Merges=", "256")); // vocab = 256 + merges
 const EmbedDim = Number(ReadArg("--EmbedDim=", "128"));
 const NumLayers = Number(ReadArg("--Layers=", "4"));
+const NumHeads = Number(ReadArg("--Heads=", "4"));
 const BlockSize = Number(ReadArg("--Block=", "128"));
 const BatchSize = Number(ReadArg("--Batch=", "16"));
 const Steps = Number(ReadArg("--Steps=", "2000"));
@@ -85,7 +86,7 @@ const WarmupSteps = Math.max(1, Math.min(40, Math.floor(EffectiveSteps / 4)));
 const EvalInterval = Measure ? EffectiveSteps + 1 : Math.max(1, Math.min(100, EffectiveSteps));
 const Config = LoadConfig({
   Overrides: {
-    Model: { VocabSize: Tokenizer.VocabSize, EmbedDim, NumLayers, NumHeads: 4, BlockSize, PositionScheme: "Rope", NormKind: "RmsNorm", MlpKind: "SwiGlu" },
+    Model: { VocabSize: Tokenizer.VocabSize, EmbedDim, NumLayers, NumHeads, BlockSize, PositionScheme: "Rope", NormKind: "RmsNorm", MlpKind: "SwiGlu" },
     Training: { BatchSize, EvalInterval, EvalIterations: 10, CheckpointInterval: EffectiveSteps },
     Schedule: { Kind: "Cosine", WarmupSteps, MaxSteps: EffectiveSteps, MinLrRatio: 0.1 },
     Optimizer: { Kind: "AdamW", LearningRate: 0.003 },

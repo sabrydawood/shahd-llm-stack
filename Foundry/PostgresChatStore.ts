@@ -15,7 +15,11 @@ export class PostgresChatStore implements ChatStore {
 
   constructor(Url: string) {
     this.Sql = postgres(Url);
-    this.Ready = this.Migrate();
+    // Swallow the rejection here so a DB blip at startup can't become an unhandled rejection (which
+    // Bun turns into a process exit). The real failure still surfaces when a method awaits a query.
+    this.Ready = this.Migrate().catch((Caught) => {
+      console.warn(`PostgresChatStore: migration deferred: ${(Caught as Error).message}`);
+    });
   }
 
   private async Migrate(): Promise<void> {

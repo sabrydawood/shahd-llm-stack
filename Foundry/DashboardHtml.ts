@@ -138,7 +138,7 @@ export const DashboardHtml = `<!doctype html><html><head><meta charset="utf-8"><
  function setOverall(f,txt){Q('ofill').style.width=Math.max(0,Math.min(1,f))*100+'%';Q('olab').textContent=txt;}
  function setRepo(f,repo,txt){Q('rfill').style.width=Math.max(0,Math.min(1,f))*100+'%';Q('rrepo').textContent=repo;Q('rlab').textContent=txt;}
  function onLearn(e){
-  if(e.kind==='start'){seen=0;ingested=0;files=0;bytes=0;running=true;Q('go').disabled=true;Q('log').innerHTML='';line('▶ learning from '+e.source+' ('+(e.query||'own repos')+')');setOverall(.02,'0 / '+maxRepos+' repos');setRepo(0,'current repo','');}
+  if(e.kind==='start'){if(e.repos)maxRepos=e.repos;seen=0;ingested=0;files=0;bytes=0;running=true;Q('go').disabled=true;Q('log').innerHTML='';line('▶ learning from '+e.source+' ('+(e.query||'own repos')+')');setOverall(.02,'0 / '+maxRepos+' repos');setRepo(0,'current repo','');}
   else if(e.kind==='repo'){seen++;if(e.ingested){ingested++;files+=e.files;bytes+=e.bytes;}line((e.ingested?'✓ ':'· ')+e.repo+'  ['+e.level+', '+e.files+' files, '+fmtB(e.bytes)+']'+(e.ingested?' INGESTED':' skipped'+(e.reason?' ('+e.reason+')':'')),e.ingested?'ok':'skip');setOverall(seen/maxRepos,seen+' / '+maxRepos+' repos · '+ingested+' ingested · '+files+' files · '+fmtB(bytes));}
   else if(e.kind==='repo-progress'){setRepo(e.filesTotal?e.filesDone/e.filesTotal:0,'ingesting '+e.repo,e.filesDone+' / '+e.filesTotal+' files');}
   else if(e.kind==='done'){running=false;Q('go').disabled=false;setOverall(1,'done · '+ingested+' repos · '+e.ingested+' files');setRepo(1,'current repo','complete');line('done — '+e.ingested+' files ingested from '+ingested+' repos','ok');loadRepos();}

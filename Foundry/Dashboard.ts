@@ -64,7 +64,9 @@ export function CreateDashboardParts(Store: DocumentStore, Learn?: LearnFn, Opti
   };
 
   const Emit = (Event: LearnEvent): void => {
-    Job.Events.push(Event);
+    // Per-file repo-progress is transient and high-volume — broadcast it live but do NOT buffer it in
+    // the replay array (which is re-sent to every new/reconnecting client), so memory stays O(repos).
+    if (Event.kind !== "repo-progress") Job.Events.push(Event);
     for (const Listener of Job.Listeners) Listener(Event);
     Publish({ type: "learn", event: Event });
     if (Event.kind === "done" || Event.kind === "error") Job.Running = false;
@@ -74,7 +76,7 @@ export function CreateDashboardParts(Store: DocumentStore, Learn?: LearnFn, Opti
     if (Learn === undefined || Job.Running) return false;
     Job.Running = true;
     Job.Events = [];
-    Emit({ kind: "start", query: Settings.Query, source: Settings.Source });
+    Emit({ kind: "start", query: Settings.Query, source: Settings.Source, repos: Settings.MaxRepos });
     void Learn(Settings, Emit).catch((Caught) => Emit({ kind: "error", message: (Caught as Error).message }));
     return true;
   };
@@ -172,7 +174,9 @@ export function CreateDashboardParts(Store: DocumentStore, Learn?: LearnFn, Opti
   const SendSnapshots = (Socket: Ws): void => {
     Socket.send(JSON.stringify({ type: "system", data: GetSystemInfo() }));
     Socket.send(JSON.stringify({ type: "model", data: Options.Model ?? null }));
-    void Store.Stats().then((S) => Socket.send(JSON.stringify({ type: "stats", data: S })));
+    void Store.Stats()
+      .then((S) => Socket.send(JSON.stringify({ type: "stats", data: S })))
+      .catch(() => undefined); // a transient store error must not become an unhandled rejection
     for (const Event of Job.Events) Socket.send(JSON.stringify({ type: "learn", event: Event }));
   };
 
@@ -188,7 +192,8 @@ export function CreateDashboardParts(Store: DocumentStore, Learn?: LearnFn, Opti
       return;
     }
     try {
-      const Opts = { Temperature: ToNum(Msg.temperature, 0.8), MaxTokens: ToNum(Msg.maxTokens, 160) };
+      // Abort generation if the client goes away (readyState leaves OPEN=1) — don't burn CPU for nobody.
+      const Opts = { Temperature: ToNum(Msg.temperature, 0.8), MaxTokens: ToNum(Msg.maxTokens, 160), ShouldStop: (): boolean => Socket.readyState !== 1 };
       await Chat.Turn(ConvId, Msg.message, Opts, (Delta) => Socket.send(JSON.stringify({ type: "chat-delta", convId: ConvId, delta: Delta })));
       Socket.send(JSON.stringify({ type: "chat-done", convId: ConvId }));
     } catch (Caught) {
@@ -223,7 +228,9 @@ export function CreateDashboardParts(Store: DocumentStore, Learn?: LearnFn, Opti
   };
   const Snapshot = (): void => {
     Publish({ type: "system", data: GetSystemInfo() });
-    void Store.Stats().then((S) => Publish({ type: "stats", data: S }));
+    void Store.Stats()
+      .then((S) => Publish({ type: "stats", data: S }))
+      .catch(() => undefined); // transient store error must not crash the ticker
   };
 
   return { Fetch, WebSocket, AttachServer, Snapshot };

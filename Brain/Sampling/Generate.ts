@@ -42,15 +42,17 @@ export async function GenerateAsync(
   MaxNewTokens: number,
   Options: SamplingOptions,
   Rng: SeededRng,
-  OnToken: (Id: number) => void, // fired after each newly sampled token
+  OnToken: (Id: number) => void, // fired after each newly sampled token (may throw to abort)
+  ShouldStop?: () => boolean, // checked each step; stop early when true (e.g. client disconnected)
 ): Promise<number[]> {
   const Ids = [...PromptIds];
   const BlockSize = Model.Config.Model.BlockSize;
   const VocabSize = Model.Config.Model.VocabSize;
   for (let S = 0; S < MaxNewTokens; S++) {
+    if (ShouldStop?.() === true) break;
     const Next = StepToken(Model, Ids, BlockSize, VocabSize, Options, Rng);
     Ids.push(Next);
-    OnToken(Next);
+    OnToken(Next); // a throw here (e.g. output safety block) unwinds the loop
     // Yield a macrotask so buffered stream writes reach the client between tokens (real streaming).
     await new Promise<void>((Resolve) => setTimeout(Resolve, 0));
   }

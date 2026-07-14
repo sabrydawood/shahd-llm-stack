@@ -86,7 +86,7 @@ export const ChatHtml = `<!doctype html><html><head><meta charset="utf-8"><meta 
  function connect(){
   WS=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
   WS.onopen=function(){Q('stat').textContent='';};
-  WS.onclose=function(){Q('stat').textContent='reconnecting…';setTimeout(connect,2000);};
+  WS.onclose=function(){Q('stat').textContent='reconnecting…';if(streaming){if(curBubble){curBubble.parentElement.className='msg err';curBubble.textContent='connection lost — resend your message';}endStream();}setTimeout(connect,2000);};
   WS.onmessage=function(ev){var m=JSON.parse(ev.data);
    if(m.type==='chat-delta'&&m.convId===convId&&curBubble){curBubble.textContent+=m.delta;Q('chat').scrollTop=Q('chat').scrollHeight;}
    else if(m.type==='chat-done'&&m.convId===convId){Q('stat').textContent='';endStream();loadConvs();}

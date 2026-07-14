@@ -35,7 +35,7 @@ function LoadChat(): { Chat?: ChatService; Model: ModelInfo | null; Note: string
     const Stream: ChatStreamFn = (Messages, Opts, OnDelta) => {
       const Prompt = RenderMessages(Messages.map((M) => ({ role: M.Role, content: M.Content })));
       const Rng = new SeededRng(Config.Training.Seed + Counter++);
-      return GuardedGenerateStream(Model, Tokenizer, Prompt, Opts.MaxTokens, { ...DefaultSampling, Temperature: Opts.Temperature }, Rng, Config, OnDelta);
+      return GuardedGenerateStream(Model, Tokenizer, Prompt, Opts.MaxTokens, { ...DefaultSampling, Temperature: Opts.Temperature }, Rng, Config, OnDelta, Opts.ShouldStop);
     };
     // Chat memory in Postgres (synced with the corpus, durable) when DATABASE_URL is set; else in-memory.
     const DbUrl = process.env["DATABASE_URL"];
@@ -61,7 +61,12 @@ const Learn: LearnFn = async (Settings, OnEvent) => {
   if (Settings.Source !== "github") {
     Providers.push(CreateLocalRepoProvider({ Roots: Settings.Repos, MinLevel: Settings.MinLevel, MaxFiles: Settings.MaxFilesPerRepo, MaxBytes: Settings.MaxBytesPerRepo, MaxContentBytes: Settings.MaxContentBytes, SkipRepo: Skip, OnRepo }));
   }
-  const OnProgress = (Repo: string, Done: number, Total: number): void => OnEvent({ kind: "repo-progress", repo: Repo, filesDone: Done, filesTotal: Total });
+  // Throttle to ~50 updates per repo (one every Stride files, plus the final one) so a big repo does
+  // not emit thousands of progress events.
+  const OnProgress = (Repo: string, Done: number, Total: number): void => {
+    const Stride = Math.max(1, Math.floor(Total / 50));
+    if (Done % Stride === 0 || Done === Total) OnEvent({ kind: "repo-progress", repo: Repo, filesDone: Done, filesTotal: Total });
+  };
   const Stats = await IngestFromWeb(Providers, [Settings.Query], Store, new Date().toISOString(), Settings.MaxRepos, 256, OnProgress);
   OnEvent({ kind: "done", ingested: Stats.Ingested });
 };

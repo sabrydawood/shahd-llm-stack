@@ -17,7 +17,7 @@ export type LearnSettings = {
 };
 
 export type LearnEvent =
-  | { kind: "start"; query: string; source: string }
+  | { kind: "start"; query: string; source: string; repos: number } // repos = MaxRepos, for the progress bar denominator
   | { kind: "repo"; repo: string; level: string; files: number; bytes: number; ingested: boolean; reason: string | null }
   | { kind: "repo-progress"; repo: string; filesDone: number; filesTotal: number } // per-repo file ingestion
   | { kind: "done"; ingested: number }

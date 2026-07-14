@@ -45,10 +45,12 @@ export function GuardedGenerate(
 /**
  * Streaming sibling of GuardedGenerate: emits the completion as decoded deltas via OnDelta as tokens
  * are produced, and returns the full completion (the NEW text only, excluding the prompt). Prompt
- * safety + resource caps are enforced up front; output safety runs once at the end (a streamed local
- * run shows text as it comes, then the final guard vets the whole output). A trailing U+FFFD from a
- * not-yet-complete multibyte (byte-level BPE) token is held back until its bytes arrive, so partial
- * characters are never shown.
+ * safety + resource caps are enforced up front. Output safety is enforced INCREMENTALLY — the
+ * growing text is vetted BEFORE each delta is emitted, so blocked content is never delivered (the
+ * stream stops at the first token that trips the guard, matching the block-before-delivery guarantee
+ * of the non-streaming path). A trailing U+FFFD from a not-yet-complete multibyte (byte-level BPE)
+ * token is held back until its bytes arrive. ShouldStop lets a caller abort early (e.g. the client
+ * disconnected) so no compute is wasted generating for nobody.
  */
 export async function GuardedGenerateStream(
   Model: Shahd,
@@ -59,6 +61,7 @@ export async function GuardedGenerateStream(
   Rng: SeededRng,
   Config: ResolvedConfig,
   OnDelta: (Delta: string) => void,
+  ShouldStop?: () => boolean,
 ): Promise<string> {
   const Policy = new SafetyPolicy(Config);
   Policy.EnforceInput(Prompt);
@@ -72,18 +75,30 @@ export async function GuardedGenerateStream(
   const Incomplete = String.fromCharCode(0xfffd); // U+FFFD: a not-yet-complete multibyte char
   const NewIds: number[] = [];
   let Emitted = 0;
-  await GenerateAsync(Model, PromptIds, CappedNewTokens, Options, Rng, (Id: number): void => {
-    NewIds.push(Id);
-    let Stable = Tokenizer.Decode(NewIds);
-    while (Stable.endsWith(Incomplete)) Stable = Stable.slice(0, -1); // hold back an incomplete char
-    if (Stable.length > Emitted) {
-      OnDelta(Stable.slice(Emitted));
-      Emitted = Stable.length;
-    }
-  });
+  const EmitVetted = (Text: string): void => {
+    if (Text.length <= Emitted) return;
+    Policy.EnforceOutput(Prompt + Text); // vet BEFORE delivering — throws (and aborts) if unsafe
+    OnDelta(Text.slice(Emitted));
+    Emitted = Text.length;
+  };
+
+  await GenerateAsync(
+    Model,
+    PromptIds,
+    CappedNewTokens,
+    Options,
+    Rng,
+    (Id: number): void => {
+      NewIds.push(Id);
+      let Stable = Tokenizer.Decode(NewIds);
+      while (Stable.endsWith(Incomplete)) Stable = Stable.slice(0, -1); // hold back an incomplete char
+      EmitVetted(Stable);
+    },
+    ShouldStop,
+  );
 
   const Completion = Tokenizer.Decode(NewIds);
-  if (Completion.length > Emitted) OnDelta(Completion.slice(Emitted)); // flush any held-back tail
-  Policy.EnforceOutput(Prompt + Completion);
+  Policy.EnforceOutput(Prompt + Completion); // final full-text vet (unconditional), then flush the tail
+  if (Completion.length > Emitted) OnDelta(Completion.slice(Emitted));
   return Completion;
 }

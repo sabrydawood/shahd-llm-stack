@@ -6,8 +6,9 @@
 
 import type { WebProvider, RepoSink } from "./WebSource.ts";
 import type { SourceInput } from "./Ingest.ts";
-import type { HttpJson, FetchBytes } from "./GitHubHttp.ts";
-import { DefaultGitHubJson, DefaultGitHubBytes } from "./GitHubHttp.ts";
+import type { HttpJson, FetchBytes, RepoLicense } from "./GitHubHttp.ts";
+import { DefaultGitHubJson, DefaultGitHubBytes, FetchRepoLicense } from "./GitHubHttp.ts";
+import { DetectSpdx } from "./SpdxDetector.ts";
 import { FetchRepoFiles } from "./RepoArchive.ts";
 import { AssessRepo, LevelRank, EmptyAssessment } from "./RepoQuality.ts";
 import type { RepoLevel, RepoIngestInfo } from "./RepoQuality.ts";
@@ -29,11 +30,39 @@ export type GitHubRepoOptions = {
   OnRepo?: (Info: RepoIngestInfo) => void; // progress/reporting hook
   OnRepoReady?: RepoSink; // when set, each repo is streamed here (stored) right after download
   Log?: (Message: string) => void; // server-console trail (default console.log): every repo's fate
+  FetchLicense?: (FullName: string) => Promise<RepoLicense | null>; // NOASSERTION resolver (injected in tests)
 };
 
 // GitHub search returns at most 100 results per page and 1000 total per query.
 const SearchPerPage = 100;
 const SearchMaxResults = 1000;
+
+// GitHub returns spdx_id "NOASSERTION" (or none) for repos whose LICENSE its matcher can't classify —
+// which the Foundry would reject on license grounds even when the code is actually MIT/BSD/Apache.
+// Read the real LICENSE text and, ONLY when it is provably a single clean permissive template, use the
+// detected SPDX id. Anything ambiguous/copyleft/commercial keeps its unresolved label and stays
+// rejected. A fetch/detect failure is non-fatal — the label is simply left unchanged.
+async function ResolvePermissiveLicense(
+  FullName: string,
+  Current: string,
+  Fetch: (Name: string) => Promise<RepoLicense | null>,
+  Log: (Message: string) => void,
+): Promise<string> {
+  try {
+    const License = await Fetch(FullName);
+    if (License === null) return Current;
+    const Detected = DetectSpdx(License.Text);
+    if (Detected.Permissive && Detected.Spdx !== null) {
+      Log(`[gh] ${FullName}: license ${Current} -> ${Detected.Spdx} (verified permissive from LICENSE)`);
+      return Detected.Spdx;
+    }
+    Log(`[gh] ${FullName}: license stays ${Current} (${Detected.Note})`);
+    return Current;
+  } catch (Caught) {
+    Log(`[gh] ${FullName}: license resolve failed: ${(Caught as Error).message}`);
+    return Current;
+  }
+}
 
 export function CreateGitHubRepoProvider(Options: GitHubRepoOptions = {}): WebProvider {
   const Http = Options.Http ?? DefaultGitHubJson(Options.Token);
@@ -41,6 +70,7 @@ export function CreateGitHubRepoProvider(Options: GitHubRepoOptions = {}): WebPr
   const Limits = { MaxFiles: Options.MaxFilesPerRepo, MaxBytes: Options.MaxBytesPerRepo, MaxContentBytes: Options.MaxContentBytesPerRepo };
   const MinLevel = Options.MinLevel ?? "medium";
   const Log = Options.Log ?? ((Message: string): void => console.log(Message));
+  const FetchLicense = Options.FetchLicense ?? ((Name: string): Promise<RepoLicense | null> => FetchRepoLicense(Name, Options.Token));
 
   return {
     Name: "github-repo",
@@ -89,15 +119,20 @@ export function CreateGitHubRepoProvider(Options: GitHubRepoOptions = {}): WebPr
           const Files = await FetchRepoFiles(`https://api.github.com/repos/${Repo.full_name}/tarball/${Repo.default_branch}`, Fetch, Limits);
           const Assessment = AssessRepo(Files);
           const Ingested = LevelRank[Assessment.Level] >= LevelRank[MinLevel];
-          Log(`[gh] ${Repo.full_name}: level=${Assessment.Level} files=${Assessment.FileCount} bytes=${Assessment.TotalBytes} -> ${Ingested ? "ingest" : `skip (below ${MinLevel})`}`);
-          Options.OnRepo?.({ Repo: Repo.full_name, License, Assessment, Ingested, Reason: Ingested ? undefined : `level ${Assessment.Level} below minimum ${MinLevel}` });
           if (!Ingested) {
+            Log(`[gh] ${Repo.full_name}: level=${Assessment.Level} files=${Assessment.FileCount} bytes=${Assessment.TotalBytes} -> skip (below ${MinLevel})`);
+            Options.OnRepo?.({ Repo: Repo.full_name, License, Assessment, Ingested: false, Reason: `level ${Assessment.Level} below minimum ${MinLevel}` });
             SkippedLevel++;
             continue; // skip low-level repos entirely
           }
+          // Only resolve an unclassifiable license for repos we will actually store (after the level
+          // gate) — one extra /license call per NOASSERTION repo, not per searched repo.
+          const StoreLicense = License === "NOASSERTION" || License === "unknown" ? await ResolvePermissiveLicense(Repo.full_name, License, FetchLicense, Log) : License;
+          Log(`[gh] ${Repo.full_name}: level=${Assessment.Level} files=${Assessment.FileCount} bytes=${Assessment.TotalBytes} -> ingest (license ${StoreLicense})`);
+          Options.OnRepo?.({ Repo: Repo.full_name, License: StoreLicense, Assessment, Ingested: true });
           const Inputs: SourceInput[] = Files.map((File) => ({
             Source: Repo.full_name,
-            License,
+            License: StoreLicense,
             Lang: LangForPath(File.Path),
             Content: File.Content,
             Provenance: `https://github.com/${Repo.full_name}/blob/${Repo.default_branch}/${File.Path}`,

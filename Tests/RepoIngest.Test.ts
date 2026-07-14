@@ -124,6 +124,31 @@ test("resilient collect: one repo failing (e.g. rate-limit) does not abort the w
   expect(Logs.some((L) => L.includes("errored=1") && L.includes("stored=1"))).toBe(true); // summary is auditable
 });
 
+test("NOASSERTION license is resolved from the real LICENSE: permissive -> detected SPDX, else unchanged", async () => {
+  const Tar1 = await Tar(["A", "B", "C"].map((N) => ({ name: `mit-sha/src/${N}.ts`, data: Code(N) })));
+  const Tar2 = await Tar(["D", "E", "F"].map((N) => ({ name: `gpl-sha/src/${N}.ts`, data: Code(N) })));
+  const Http: HttpJson = async () => ({
+    items: [
+      { full_name: "acme/mitrepo", default_branch: "main", license: { spdx_id: "NOASSERTION" } },
+      { full_name: "acme/gplrepo", default_branch: "main", license: { spdx_id: "NOASSERTION" } },
+    ],
+  });
+  const BytesFetcher: FetchBytes = async (Url) => (Url.includes("acme/mitrepo") ? Tar1 : Tar2);
+  const MitText = 'MIT License\n\nCopyright (c) 2025 X\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.\n';
+  const Provider = CreateGitHubRepoProvider({
+    Http,
+    FetchBytes: BytesFetcher,
+    MinLevel: "medium",
+    FetchLicense: async (Name) => (Name.includes("mitrepo") ? { Spdx: "NOASSERTION", Text: MitText } : { Spdx: "NOASSERTION", Text: "GNU GENERAL PUBLIC LICENSE Version 3" }),
+  });
+  const Docs = await Provider.Fetch("q", 5);
+  const Mit = Docs.filter((D) => D.Source === "acme/mitrepo");
+  const Gpl = Docs.filter((D) => D.Source === "acme/gplrepo");
+  expect(Mit.length).toBe(3);
+  expect(Mit.every((D) => D.License === "MIT")).toBe(true); // verified permissive -> promoted to real SPDX
+  expect(Gpl.every((D) => D.License === "NOASSERTION")).toBe(true); // copyleft stays unresolved -> Rejected on license
+});
+
 test("expanded languages: css/html/vue/sql are recognized as code (M8)", () => {
   expect(IsSubstantiveCodePath("src/styles/main.css")).toBe(true);
   expect(IsSubstantiveCodePath("src/Page.vue")).toBe(true);

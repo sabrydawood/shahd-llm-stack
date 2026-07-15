@@ -89,7 +89,9 @@ test("regex tool runs quantifier-bearing patterns through the isolated (timeout-
 }, 12000);
 
 test("async knowledge tools: web_search stubs offline, memory round-trips", async () => {
-  const Registry = DefaultToolRegistry();
+  // web_search is now gated by WebSearchEnabled (like ExecEnabled/FileAccess), so enable it to
+  // exercise the offline stub; memory tools are AlwaysSafe and present regardless.
+  const Registry = BuildToolRegistry({ FileAccess: "Off", ExecEnabled: false, WebSearchEnabled: true });
   const Context = DefaultToolContext();
   const Search = await Registry.Run({ Name: "web_search", Arguments: { query: "x" } }, Context);
   expect(Search["stub"]).toBe(true);

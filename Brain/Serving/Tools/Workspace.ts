@@ -5,7 +5,7 @@
 // can never touch bytes outside the sanctioned root no matter what the model emits — INCLUDING via a
 // symlink planted inside the root (CWE-59), which the lexical check alone would follow transparently.
 
-import { resolve, relative, isAbsolute, sep, dirname } from "node:path";
+import { resolve, relative, isAbsolute, sep, dirname, join, basename } from "node:path";
 import { realpathSync, existsSync } from "node:fs";
 
 function Escapes(Rel: string): boolean {
@@ -22,30 +22,36 @@ export class Workspace {
     this.RealRoot = existsSync(this.Root) ? realpathSync(this.Root) : this.Root;
   }
 
-  /** Resolve a workspace-relative path to an absolute one, or throw if it escapes Root. */
+  /** Resolve a workspace-relative path to an absolute one, or throw if it escapes Root.
+   *  When Root exists, the REAL (symlink-resolved) path is returned rather than the lexical one: this
+   *  closes the TOCTOU window between this check and the caller's later statSync/readFileSync/
+   *  writeFileSync, which would otherwise re-resolve a symlink that could have been swapped in between. */
   Resolve(RelPath: string): string {
     const Absolute = resolve(this.Root, RelPath);
     const Rel = relative(this.Root, Absolute);
     if (Escapes(Rel)) throw new Error(`path escapes workspace root: ${RelPath}`);
-    // Lexical check passed; now defeat SYMLINK escapes (only meaningful when the root exists, so real
-    // components — a symlink among them — can exist): resolve the real path of the target (or its
+    if (!existsSync(this.Root)) return Absolute; // nothing real to resolve against yet
+    // Lexical check passed; now defeat SYMLINK escapes: resolve the real path of the target (or its
     // nearest existing ancestor, for a not-yet-created file) and re-verify it is still under the REAL
-    // root. A symlink inside Root pointing outside would otherwise be followed silently.
-    if (existsSync(this.Root)) {
-      const RealRel = relative(this.RealRoot, this.RealPathOfNearestExisting(Absolute));
-      if (Escapes(RealRel)) throw new Error(`path escapes workspace root (symlink): ${RelPath}`);
-    }
-    return Absolute;
+    // root. A symlink inside Root pointing outside would otherwise be followed silently. RETURN this
+    // real path (instead of re-deriving it later) so callers act on the already-validated location.
+    const RealAbsolute = this.RealPathOf(Absolute);
+    const RealRel = relative(this.RealRoot, RealAbsolute);
+    if (Escapes(RealRel)) throw new Error(`path escapes workspace root (symlink): ${RelPath}`);
+    return RealAbsolute;
   }
 
-  // realpath of the deepest ancestor of `Target` that actually exists (Target itself when it exists),
-  // so a write to a not-yet-created file is still checked against real, symlink-resolved directories.
-  private RealPathOfNearestExisting(Target: string): string {
+  // Real, symlink-resolved path for Target: if it exists, its own realpath; otherwise the realpath of
+  // its nearest existing ancestor with the not-yet-existing suffix re-appended, so a write target can
+  // be validated (and reused for the actual fs call) before the file itself exists.
+  private RealPathOf(Target: string): string {
+    const Suffix: string[] = [];
     let Current = Target;
     for (;;) {
-      if (existsSync(Current)) return realpathSync(Current);
+      if (existsSync(Current)) return join(realpathSync(Current), ...Suffix);
       const Parent = dirname(Current);
-      if (Parent === Current) return Current; // reached the fs root with nothing existing
+      if (Parent === Current) return join(Current, ...Suffix); // reached the fs root with nothing existing
+      Suffix.unshift(basename(Current));
       Current = Parent;
     }
   }

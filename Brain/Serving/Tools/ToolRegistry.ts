@@ -6,6 +6,10 @@ import type { ToolCall } from "../ToolProtocol.ts";
 import type { Tool, ToolContext, ToolResult, ToolRegistryView } from "./ToolTypes.ts";
 import { Err } from "./ToolArgs.ts";
 
+// Hard ceiling on how long a single Execute may run. Without this a slow/hung tool (including a
+// slow MCP-bridged one riding StdioTransport) could block RunAgent past MaxSteps indefinitely.
+const ToolTimeoutMs = 15_000;
+
 export class ToolRegistry implements ToolRegistryView {
   private Tools = new Map<string, Tool>();
 
@@ -25,14 +29,21 @@ export class ToolRegistry implements ToolRegistryView {
     return [...this.Tools.values()];
   }
 
-  /** Run a parsed tool call with the given context; returns the tool's result or an error object. */
+  /** Run a parsed tool call with the given context; returns the tool's result or an error object.
+   *  Races Execute against ToolTimeoutMs so a hung tool can never stall the agent loop. */
   async Run(Call: ToolCall, Context?: ToolContext): Promise<ToolResult> {
     const Tool = this.Tools.get(Call.Name);
     if (Tool === undefined) return Err(`unknown tool: ${Call.Name}`);
+    let TimeoutHandle: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Tool.Execute(Call.Arguments, Context);
+      const Timeout = new Promise<never>((_Resolve, Reject) => {
+        TimeoutHandle = setTimeout(() => Reject(new Error("tool timed out")), ToolTimeoutMs);
+      });
+      return await Promise.race([Promise.resolve(Tool.Execute(Call.Arguments, Context)), Timeout]);
     } catch (Error_) {
       return Err((Error_ as Error).message);
+    } finally {
+      if (TimeoutHandle !== undefined) clearTimeout(TimeoutHandle);
     }
   }
 }

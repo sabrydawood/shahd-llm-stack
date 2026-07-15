@@ -14,22 +14,29 @@ export const ToolTokenList: readonly string[] = Object.values(ToolTokens);
 
 export type ToolCall = { Name: string; Arguments: Record<string, unknown> };
 
-/** Parse the first tool call (JSON with a "name") from generated text, or null if none/invalid. */
+/** Parse the first tool call (JSON with a "name") from generated text, or null if none/invalid.
+ *  If the JSON up to the first CallEnd fails to parse (e.g. the argument text itself happened to
+ *  contain something resembling the sentinel), retry against each LATER CallEnd occurrence in turn —
+ *  only giving up once there are no further occurrences to try. */
 export function ParseToolCall(Text: string): ToolCall | null {
   const Start = Text.indexOf(ToolTokens.CallStart);
   if (Start === -1) return null;
   const From = Start + ToolTokens.CallStart.length;
-  const End = Text.indexOf(ToolTokens.CallEnd, From);
-  const Json = Text.slice(From, End === -1 ? undefined : End).trim();
-  try {
-    const Parsed = JSON.parse(Json) as { name?: unknown; arguments?: unknown };
-    if (typeof Parsed.name !== "string") return null;
-    const Arguments = typeof Parsed.arguments === "object" && Parsed.arguments !== null
-      ? (Parsed.arguments as Record<string, unknown>)
-      : {};
-    return { Name: Parsed.name, Arguments };
-  } catch {
-    return null;
+  let SearchFrom = From;
+  for (;;) {
+    const End = Text.indexOf(ToolTokens.CallEnd, SearchFrom);
+    const Json = Text.slice(From, End === -1 ? undefined : End).trim();
+    try {
+      const Parsed = JSON.parse(Json) as { name?: unknown; arguments?: unknown };
+      if (typeof Parsed.name !== "string") return null;
+      const Arguments = typeof Parsed.arguments === "object" && Parsed.arguments !== null
+        ? (Parsed.arguments as Record<string, unknown>)
+        : {};
+      return { Name: Parsed.name, Arguments };
+    } catch {
+      if (End === -1) return null; // no further CallEnd occurrences left to retry against
+      SearchFrom = End + ToolTokens.CallEnd.length;
+    }
   }
 }
 

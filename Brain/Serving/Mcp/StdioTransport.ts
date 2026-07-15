@@ -12,6 +12,10 @@ import type { McpTransport, JsonRpcRequest, JsonRpcResponse } from "./McpTypes.t
 
 type Pending = { Resolve: (Value: unknown) => void; Reject: (Reason: Error) => void };
 
+// A malformed/malicious server that never emits a newline could otherwise grow `this.Buffer` without
+// bound; cap it and fail the transport instead of exhausting memory.
+const MaxBufferBytes = 8 * 1024 * 1024; // 8 MiB
+
 export class StdioTransport implements McpTransport {
   private Proc: ReturnType<typeof Bun.spawn>;
   private Stdin: FileSink;
@@ -36,6 +40,11 @@ export class StdioTransport implements McpTransport {
         const { done: Done, value: Value } = await Reader.read();
         if (Done) break;
         this.Buffer += Decoder.decode(Value, { stream: true });
+        if (this.Buffer.length > MaxBufferBytes) {
+          this.RejectAll(new Error(`MCP transport buffer exceeded max size (${MaxBufferBytes} bytes)`));
+          this.Close();
+          return;
+        }
         let Newline = this.Buffer.indexOf("\n");
         while (Newline !== -1) {
           const Line = this.Buffer.slice(0, Newline).trim();

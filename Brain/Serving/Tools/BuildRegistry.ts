@@ -35,7 +35,7 @@ const AlwaysSafe = [
   CalculatorTool, StatsTool,
   JsonTool, RegexTool, TextTool,
   CurrentTimeTool, HashTool, UuidTool, RandomIntTool,
-  WebSearchTool, MemoryStoreTool, MemoryRecallTool,
+  MemoryStoreTool, MemoryRecallTool,
   UserAskTool, ListToolsTool, PlanTool, CompactTool, FinishTool,
 ];
 
@@ -43,6 +43,7 @@ const AlwaysSafe = [
 export function BuildToolRegistry(Policy: ToolsPolicy): ToolRegistry {
   const Registry = new ToolRegistry();
   for (const Tool of AlwaysSafe) Registry.Register(Tool);
+  if (Policy.WebSearchEnabled) Registry.Register(WebSearchTool);
   if (Policy.ExecEnabled) Registry.Register(RunCodeTool);
   if (Policy.FileAccess !== "Off") {
     Registry.Register(FileReadTool);

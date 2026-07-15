@@ -65,6 +65,15 @@ export const RandomIntTool: Tool = {
     const Max = Math.trunc(OptionalNumber(Arguments, "max", 100));
     if (Max < Min) return Err("max must be >= min");
     const Span = Max - Min + 1;
-    return { result: Min + (NextU32(Context) % Span) };
+    // Rejection sampling for uniformity: NextU32() % Span is biased toward the low end unless 2^32 is
+    // an exact multiple of Span. Redraw any value >= the largest multiple of Span that still fits in
+    // 2^32, so every outcome in [Min, Max] is equally likely. When Span itself exceeds the 32-bit draw
+    // range, a single draw can never uniformly cover it anyway, so fall back to the plain modulo.
+    const TwoPow32 = 0x100000000;
+    if (Span > TwoPow32) return { result: Min + (NextU32(Context) % Span) };
+    const Limit = Math.floor(TwoPow32 / Span) * Span;
+    let Draw = NextU32(Context);
+    while (Draw >= Limit) Draw = NextU32(Context);
+    return { result: Min + (Draw % Span) };
   },
 };

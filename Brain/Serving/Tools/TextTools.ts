@@ -73,11 +73,13 @@ export const RegexTool: Tool = {
     const Pattern = RequireString(Arguments, "pattern");
     const Text = RequireString(Arguments, "text");
     if (Text.length > MaxRegexInput) return Err(`text exceeds ${MaxRegexInput} chars`);
+    if (Pattern.length > MaxRegexInput) return Err(`pattern exceeds ${MaxRegexInput} chars`);
     if (LooksLikeReDoS(Pattern)) return Err("pattern rejected: possible catastrophic backtracking");
     const Flags = OptionalString(Arguments, "flags", "");
     const Action = OptionalString(Arguments, "action", "match");
     if (Action !== "match" && Action !== "replace") return Err(`unknown action: ${Action}`);
     const Replacement = OptionalString(Arguments, "replacement", "");
+    if (Replacement.length > MaxRegexInput) return Err(`replacement exceeds ${MaxRegexInput} chars`);
     // Validate the pattern compiles (fast, clear error) before any execution.
     try {
       new RegExp(Pattern, Flags);

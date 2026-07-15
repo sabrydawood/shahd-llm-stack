@@ -12,6 +12,17 @@ import type { ToolCall } from "./ToolProtocol.ts";
 import { ParseToolCall, FormatToolResult } from "./ToolProtocol.ts";
 import { StripThinking } from "../Reasoning/ThinkingMode.ts";
 
+// Host-enforced backstop, independent of the model ever choosing to call the `compact` tool: once
+// the running session grows past this many messages, RunAgent compacts it unconditionally so a long
+// or looping conversation can never grow the context/prompt without bound.
+const HardMessageCap = 40;
+const HardMessageKeep = 20;
+
+/** Compact Session if it has grown past the hard cap, regardless of whether the model requested it. */
+function EnforceHardCap(Session: ChatSession, Context?: ToolContext): void {
+  if (Session.Messages.length > HardMessageCap) Session.Compact(HardMessageKeep, Context?.Summarize);
+}
+
 // The generator is handed the live ChatSession (not a pre-rendered string) so it renders the prompt
 // however its tokenizer requires: a special-token (chat) model MUST render to ids via
 // Session.RenderPromptIds (base-encoding untrusted content so it can't smuggle control tokens); tests
@@ -55,13 +66,16 @@ export async function RunAgent(
       // the reasoning is still observable, but it must never leak into the visible reply or context.
       const Answer = StripThinking(Generated);
       Session.AddAssistant(Answer);
+      EnforceHardCap(Session, Context);
       OnStep?.({ Index: Step, Generated, Call: null, Result: null, Terminal: true });
       return { FinalText: Answer, Steps: Step + 1, ToolCalls, HitStepLimit: false };
     }
     ToolCalls.push(Call);
     Session.AddAssistant(Generated); // record the tool-call turn
+    EnforceHardCap(Session, Context);
     const Result = await Registry.Run(Call, Context); // never throws
     Session.AddToolResult(FormatToolResult(Result));
+    EnforceHardCap(Session, Context);
     // The one other terminal path: a successful `finish` (Terminal) tool call ends the loop.
     const Tool = Registry.Get(Call.Name);
     const Terminal = Tool?.Terminal === true && !("error" in Result);

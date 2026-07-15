@@ -9,6 +9,7 @@ import type { Tool, ToolContext } from "./ToolTypes.ts";
 import { Err, RequireString } from "./ToolArgs.ts";
 
 const MaxWalkEntries = 5000;
+const MaxListEntries = 2000;
 
 function RequireWorkspace(Context: ToolContext | undefined): NonNullable<ToolContext["Workspace"]> {
   if (Context?.Workspace === undefined) throw new Error("filesystem tools disabled (no workspace)");
@@ -62,11 +63,13 @@ export const FileListTool: Tool = {
   Execute: (Arguments, Context) => {
     const Workspace = RequireWorkspace(Context);
     const Absolute = Workspace.Resolve(typeof Arguments["path"] === "string" ? String(Arguments["path"]) : ".");
-    const Entries = readdirSync(Absolute).map((Name) => {
+    const All = readdirSync(Absolute);
+    const Truncated = All.length > MaxListEntries;
+    const Entries = All.slice(0, MaxListEntries).map((Name) => {
       const IsDir = statSync(join(Absolute, Name)).isDirectory();
       return { name: Name, kind: IsDir ? "dir" : "file" };
     });
-    return { path: Workspace.Display(Absolute), entries: Entries };
+    return { path: Workspace.Display(Absolute), entries: Entries, truncated: Truncated };
   },
 };
 
@@ -94,9 +97,10 @@ export const FileWriteTool: Tool = {
     const Workspace = RequireWorkspace(Context);
     const Cap = Context?.MaxFileBytes ?? 262144;
     const Content = RequireString(Arguments, "content");
-    if (Content.length > Cap) return Err(`content exceeds cap (${Content.length} > ${Cap} bytes)`);
+    const ByteLength = Buffer.byteLength(Content, "utf8"); // writeFileSync writes UTF-8 bytes, not UTF-16 chars
+    if (ByteLength > Cap) return Err(`content exceeds cap (${ByteLength} > ${Cap} bytes)`);
     const Absolute = Workspace.Resolve(RequireString(Arguments, "path"));
     writeFileSync(Absolute, Content);
-    return { path: Workspace.Display(Absolute), bytesWritten: Content.length };
+    return { path: Workspace.Display(Absolute), bytesWritten: ByteLength };
   },
 };

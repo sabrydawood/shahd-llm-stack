@@ -19,6 +19,17 @@ type ChatRequest = {
 
 export type ChatHandler = (Req: Request) => Promise<Response>;
 
+// RenderMessages (RenderChat.ts) does `Messages.map((M) => ...M.role...M.content...)` with no guard,
+// so a malformed body (e.g. messages as a non-array, or an element missing role/content) would throw
+// synchronously OUTSIDE the JSON-parse try/catch below. Validate the shape first so bad input gets a
+// clean 400 instead of an unhandled exception.
+function IsValidMessages(Value: unknown): Value is { role: string; content: string }[] {
+  if (!Array.isArray(Value)) return false;
+  return Value.every(
+    (M) => typeof M === "object" && M !== null && typeof (M as Record<string, unknown>)["role"] === "string" && typeof (M as Record<string, unknown>)["content"] === "string",
+  );
+}
+
 export function CreateChatHandler(Model: Shahd, Tokenizer: Tokenizer, Config: ResolvedConfig): ChatHandler {
   let Counter = 0;
   return async (Req: Request): Promise<Response> => {
@@ -31,6 +42,9 @@ export function CreateChatHandler(Model: Shahd, Tokenizer: Tokenizer, Config: Re
       Body = (await Req.json()) as ChatRequest;
     } catch {
       return Response.json({ error: "invalid JSON body" }, { status: 400 });
+    }
+    if (Body.messages !== undefined && !IsValidMessages(Body.messages)) {
+      return Response.json({ error: "invalid messages: expected an array of { role: string, content: string }" }, { status: 400 });
     }
     const Prompt = RenderMessages(Body.messages ?? []);
     const MaxNew = Body.max_tokens ?? 128;

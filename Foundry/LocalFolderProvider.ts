@@ -23,6 +23,7 @@ export type LocalFolderOptions = {
   MinChars?: number; // skip near-empty files
   StripBookBoilerplate?: boolean; // strip Project Gutenberg header/footer (default true)
   BatchSize?: number;
+  FlushBytes?: number; // also flush a batch once it holds this many bytes (bounds memory on big files)
   SkipRoot?: (Name: string) => boolean;
   OnRepoStart?: (Name: string) => void;
   OnRepoReady?: RepoSink;
@@ -56,11 +57,19 @@ function ReadTextFile(Full: string, MaxContentBytes: number): string | null {
   }
 }
 
-function WalkFolder(Root: string, MaxFiles: number, MaxBytes: number, MaxContentBytes: number): { Path: string; Content: string }[] {
-  const Out: { Path: string; Content: string }[] = [];
-  let Bytes = 0;
-  const Walk = (Dir: string): void => {
-    if (Out.length >= MaxFiles || Bytes >= MaxBytes) return;
+// Walk a folder recursively, invoking OnFile(relPath, content) for each readable text file. STREAMING:
+// it never holds more than one file's content, so ingesting a huge corpus (e.g. all of Gutenberg, tens
+// of GB) can never buffer the whole thing into memory. Stops once MaxFiles / MaxBytes is reached.
+async function WalkFolder(
+  Root: string,
+  MaxFiles: number,
+  MaxBytes: number,
+  MaxContentBytes: number,
+  OnFile: (RelPath: string, Content: string) => Promise<void>,
+): Promise<void> {
+  const State = { Count: 0, Bytes: 0 };
+  const Walk = async (Dir: string): Promise<void> => {
+    if (State.Count >= MaxFiles || State.Bytes >= MaxBytes) return;
     let Entries: import("node:fs").Dirent[];
     try {
       Entries = readdirSync(Dir, { withFileTypes: true });
@@ -68,21 +77,21 @@ function WalkFolder(Root: string, MaxFiles: number, MaxBytes: number, MaxContent
       return;
     }
     for (const Entry of Entries) {
-      if (Out.length >= MaxFiles || Bytes >= MaxBytes) return;
+      if (State.Count >= MaxFiles || State.Bytes >= MaxBytes) return;
       const Full = join(Dir, Entry.name);
       if (Entry.isDirectory()) {
         if (Entry.name === "node_modules" || Entry.name.startsWith(".")) continue; // skip vendored / dot-dirs
-        Walk(Full);
+        await Walk(Full);
       } else if (Entry.isFile()) {
         const Content = ReadTextFile(Full, MaxContentBytes);
         if (Content === null) continue; // binary / oversized / unreadable
-        Out.push({ Path: relative(Root, Full).split("\\").join("/"), Content });
-        Bytes += Content.length;
+        await OnFile(relative(Root, Full).split("\\").join("/"), Content);
+        State.Count += 1;
+        State.Bytes += Content.length;
       }
     }
   };
-  Walk(Root);
-  return Out;
+  await Walk(Root);
 }
 
 export function CreateLocalFolderProvider(Options: LocalFolderOptions): WebProvider {
@@ -94,6 +103,7 @@ export function CreateLocalFolderProvider(Options: LocalFolderOptions): WebProvi
   const MinChars = Options.MinChars ?? 100;
   const Strip = Options.StripBookBoilerplate ?? true;
   const BatchSize = Options.BatchSize ?? 200;
+  const FlushBytes = Options.FlushBytes ?? 16_000_000; // flush a batch at ~16 MB so big books don't pile up
   const Log = Options.Log ?? ((Message: string): void => console.log(Message));
 
   return {
@@ -106,23 +116,36 @@ export function CreateLocalFolderProvider(Options: LocalFolderOptions): WebProvi
         if (Options.SkipRoot?.(Name) === true) continue;
         Options.OnRepoStart?.(Name); // signal work before walking (large folders take a moment)
         Log(`[folder] walking ${Root}…`);
-        const Files = WalkFolder(Root, MaxFiles, MaxBytes, MaxContentBytes);
-        Log(`[folder] ${Name}: ${Files.length} text file(s)`);
-        const Inputs: SourceInput[] = [];
-        for (const File of Files) {
-          const Content = (Strip ? StripBookBoilerplate(File.Content) : File.Content).trim();
-          if (Content.length < MinChars) continue; // skip near-empty
-          Inputs.push({ Source: Name, License, Lang, Content, Provenance: `${Root}/${File.Path}`, Origin: "owned" });
-        }
-        if (Options.OnRepoReady !== undefined) {
-          for (let Start = 0; Start < Inputs.length; Start += BatchSize) {
-            Options.OnRepoStart?.(`${Name} batch ${Math.floor(Start / BatchSize) + 1}`); // Stop between batches
-            await Options.OnRepoReady(Name, Inputs.slice(Start, Start + BatchSize));
+
+        // Stream: batch documents as we walk and flush incrementally, so memory is bounded to one batch
+        // (never the whole corpus) — essential for ingesting all of Gutenberg without an OOM.
+        let Batch: SourceInput[] = [];
+        let BatchBytes = 0;
+        let Total = 0;
+        const Flush = async (): Promise<void> => {
+          if (Batch.length > 0 && Options.OnRepoReady !== undefined) {
+            Options.OnRepoStart?.(`${Name} (${Total} docs)`); // Stop boundary between batches
+            await Options.OnRepoReady(Name, Batch);
+            Batch = [];
+            BatchBytes = 0;
           }
-        } else {
-          Out.push(...Inputs);
-        }
-        Log(`[folder] ${Name}: ${Inputs.length} docs ingested`);
+        };
+
+        await WalkFolder(Root, MaxFiles, MaxBytes, MaxContentBytes, async (RelPath, Raw) => {
+          const Content = (Strip ? StripBookBoilerplate(Raw) : Raw).trim();
+          if (Content.length < MinChars) return; // skip near-empty
+          const Input: SourceInput = { Source: Name, License, Lang, Content, Provenance: `${Root}/${RelPath}`, Origin: "owned" };
+          Total += 1;
+          if (Options.OnRepoReady !== undefined) {
+            Batch.push(Input);
+            BatchBytes += Content.length;
+            if (Batch.length >= BatchSize || BatchBytes >= FlushBytes) await Flush();
+          } else {
+            Out.push(Input);
+          }
+        });
+        await Flush();
+        Log(`[folder] ${Name}: ${Total} docs ingested`);
       }
       return Out;
     },

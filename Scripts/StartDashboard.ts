@@ -269,13 +269,15 @@ const Learn: LearnFn = async (Settings, OnEvent, Signal) => {
   } else if (Settings.Source === "folder") {
     // Ingest every text file under the given folder(s) as the chosen kind — the on-disk path for a
     // downloaded corpus (e.g. all of Gutenberg). License defaults to public-domain (the books case).
+    // NB: no MaxContentBytes override (the code cap is 512 KB — most books are bigger; the provider's
+    // book-sized 20 MB default applies), and NO SkipRoot — per-folder skip would short-circuit the whole
+    // folder on a second run (Source is the folder name), blocking the "add more books, re-collect"
+    // workflow; content-hash dedup already skips books already stored, cheaply.
     Providers.push(
       CreateLocalFolderProvider({
         Roots: Settings.Repos,
         License: Settings.License,
         Lang: SourceKind === "books" ? "text" : `text-${SourceKind}`,
-        MaxContentBytes: Settings.MaxContentBytes,
-        SkipRoot: Skip,
         OnRepoStart,
         OnRepoReady,
       }),

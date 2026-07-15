@@ -10,7 +10,14 @@ export function WithTapeOff<T>(Body: () => T): T {
   const Previous = Tape.On;
   Tape.On = false;
   try {
-    return Body();
+    const Result = Body();
+    // Body must be synchronous: an async body would return before it actually finishes, so the
+    // `finally` below restores Tape.On while the still-pending work keeps recording (or not
+    // recording) against a tape state that has already moved on. Fail loudly instead.
+    if (Result !== null && typeof Result === "object" && typeof (Result as { then?: unknown }).then === "function") {
+      throw new Error("WithTapeOff: Body must be synchronous");
+    }
+    return Result;
   } finally {
     Tape.On = Previous;
   }

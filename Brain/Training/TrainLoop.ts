@@ -37,6 +37,9 @@ export function TrainLoop(
     const Lr = ComputeLr(Step, Config);
     const TrainLoss = AccumulateGradients(Model, Optimizer, TrainLoader, Config.Training.BatchSize);
     const GradNorm = ClipGradGlobalNorm(Optimizer.Params, Config.Optimizer.GradClipNorm);
+    if (!Number.isFinite(GradNorm)) {
+      throw new Error(`Non-finite gradient norm at step ${Step}: ${GradNorm}`);
+    }
     Optimizer.Step(Lr);
     OnStep?.(Step, TrainLoss, Date.now() - StartMs);
 

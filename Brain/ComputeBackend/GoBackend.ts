@@ -11,6 +11,10 @@ export class GoBackend {
   private Proc: Subprocess<"pipe", "pipe", "inherit">;
   private Reader: ReadableStreamDefaultReader<Uint8Array>;
   private Leftover: Uint8Array = new Uint8Array(0);
+  // Serializes calls onto a single promise chain: MatMul reads/writes this.Reader and
+  // this.Leftover across await points, and the stdio pipe carries one request at a time,
+  // so concurrent callers must queue rather than interleave.
+  private Queue: Promise<unknown> = Promise.resolve();
 
   constructor(WorkerPath = "GoKernels/worker.exe") {
     this.Proc = Bun.spawn([WorkerPath], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
@@ -19,6 +23,12 @@ export class GoBackend {
   }
 
   async MatMul(A: Float64Array, B: Float64Array, M: number, K: number, N: number): Promise<Float64Array> {
+    const Run = this.Queue.then(() => this.MatMulOnce(A, B, M, K, N));
+    this.Queue = Run.catch(() => {});
+    return Run;
+  }
+
+  private async MatMulOnce(A: Float64Array, B: Float64Array, M: number, K: number, N: number): Promise<Float64Array> {
     const Header = new DataView(new ArrayBuffer(12));
     Header.setInt32(0, M, true);
     Header.setInt32(4, K, true);

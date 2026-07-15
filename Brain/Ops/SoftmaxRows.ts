@@ -5,6 +5,7 @@
 
 import { Tensor } from "../Tensor/Tensor.ts";
 import { Tape } from "../Tensor/Tape.ts";
+import { ComputeRowSoftmax } from "./Internal/RowSoftmax.ts";
 
 export function SoftmaxRows(X: Tensor): Tensor {
   const M = X.Rows;
@@ -12,15 +13,7 @@ export function SoftmaxRows(X: Tensor): Tensor {
   const Out = new Tensor(M, N, undefined, [X]);
 
   for (let I = 0; I < M; I++) {
-    let Max = -Infinity;
-    for (let J = 0; J < N; J++) Max = Math.max(Max, X.Data[I * N + J]);
-    let Sum = 0;
-    for (let J = 0; J < N; J++) {
-      const E = Math.exp(X.Data[I * N + J] - Max);
-      Out.Data[I * N + J] = E;
-      Sum += E;
-    }
-    for (let J = 0; J < N; J++) Out.Data[I * N + J] /= Sum;
+    ComputeRowSoftmax(X.Data, I * N, Out.Data, I * N, N);
   }
 
   if (Tape.On) {

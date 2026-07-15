@@ -4,6 +4,7 @@
 
 import { Tensor } from "../Tensor/Tensor.ts";
 import { Tape } from "../Tensor/Tape.ts";
+import { ComputeRowSoftmax } from "./Internal/RowSoftmax.ts";
 
 export function CrossEntropy(Logits: Tensor, Targets: number[]): Tensor {
   const T = Logits.Rows;
@@ -16,15 +17,7 @@ export function CrossEntropy(Logits: Tensor, Targets: number[]): Tensor {
 
   let Loss = 0;
   for (let I = 0; I < T; I++) {
-    let Max = -Infinity;
-    for (let J = 0; J < V; J++) Max = Math.max(Max, Logits.Data[I * V + J]);
-    let Sum = 0;
-    for (let J = 0; J < V; J++) {
-      const E = Math.exp(Logits.Data[I * V + J] - Max);
-      Probs[I * V + J] = E;
-      Sum += E;
-    }
-    for (let J = 0; J < V; J++) Probs[I * V + J] /= Sum;
+    ComputeRowSoftmax(Logits.Data, I * V, Probs, I * V, V);
     const Target = Targets[I];
     if (Target < 0 || Target >= V || !Number.isInteger(Target)) {
       throw new Error(`CrossEntropy: target ${Target} at position ${I} out of range [0,${V}) — likely a tokenizer/vocab mismatch`);

@@ -4,6 +4,7 @@
 
 import { Tensor } from "../Tensor/Tensor.ts";
 import { Tape } from "../Tensor/Tape.ts";
+import { ComputeRowSoftmax } from "./Internal/RowSoftmax.ts";
 
 export function MaskedCrossEntropy(Logits: Tensor, Targets: number[], Mask: boolean[]): Tensor {
   const T = Logits.Rows;
@@ -17,15 +18,7 @@ export function MaskedCrossEntropy(Logits: Tensor, Targets: number[], Mask: bool
   let Count = 0;
   let Loss = 0;
   for (let I = 0; I < T; I++) {
-    let Max = -Infinity;
-    for (let J = 0; J < V; J++) Max = Math.max(Max, Logits.Data[I * V + J]);
-    let Sum = 0;
-    for (let J = 0; J < V; J++) {
-      const E = Math.exp(Logits.Data[I * V + J] - Max);
-      Probs[I * V + J] = E;
-      Sum += E;
-    }
-    for (let J = 0; J < V; J++) Probs[I * V + J] /= Sum;
+    ComputeRowSoftmax(Logits.Data, I * V, Probs, I * V, V);
     if (Mask[I]) {
       const Target = Targets[I];
       if (Target < 0 || Target >= V || !Number.isInteger(Target)) {
@@ -35,7 +28,10 @@ export function MaskedCrossEntropy(Logits: Tensor, Targets: number[], Mask: bool
       Count++;
     }
   }
-  const Denom = Count > 0 ? Count : 1;
+  if (Count === 0) {
+    throw new Error("MaskedCrossEntropy: Mask has no true positions - nothing to train on; check the caller's masking logic before calling");
+  }
+  const Denom = Count;
   Out.Data[0] = Loss / Denom;
 
   if (Tape.On) {

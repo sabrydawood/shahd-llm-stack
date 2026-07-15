@@ -16,14 +16,18 @@ export function ApplyRope(X: Tensor, PositionStart: number, Base = 10000): Tenso
   const Half = D / 2;
   const Out = new Tensor(T, D, undefined, [X]);
 
-  // Precompute cos/sin per (row, pair) so forward and backward share them.
+  // Precompute cos/sin per (row, pair) so forward and backward share them. Freq depends only on
+  // I, not R, so it is hoisted into its own pass (Half iterations) instead of being recomputed
+  // T*Half times.
+  const FreqTable = new Float64Array(Half);
+  for (let I = 0; I < Half; I++) FreqTable[I] = Math.pow(Base, (-2 * I) / D);
+
   const Cos = new Float64Array(T * Half);
   const Sin = new Float64Array(T * Half);
   for (let R = 0; R < T; R++) {
     const Position = PositionStart + R;
     for (let I = 0; I < Half; I++) {
-      const Freq = Math.pow(Base, (-2 * I) / D);
-      const Angle = Position * Freq;
+      const Angle = Position * FreqTable[I];
       Cos[R * Half + I] = Math.cos(Angle);
       Sin[R * Half + I] = Math.sin(Angle);
     }

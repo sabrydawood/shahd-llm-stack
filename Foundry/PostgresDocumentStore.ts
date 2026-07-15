@@ -75,8 +75,10 @@ export class PostgresDocumentStore implements DocumentStore {
     return (await this.Db.select().from(this.Table)).map(FromRow);
   }
 
-  async ByTier(Tier: Tier): Promise<DocumentRecord[]> {
-    return (await this.Db.select().from(this.Table).where(eq(this.Table.tier, Tier))).map(FromRow);
+  async ByTier(Tier: Tier, Limit?: number): Promise<DocumentRecord[]> {
+    const Query = this.Db.select().from(this.Table).where(eq(this.Table.tier, Tier));
+    const Rows = Limit !== undefined ? await Query.limit(Limit) : await Query;
+    return Rows.map(FromRow);
   }
 
   async FindSimilar(Embedding: number[], Limit: number): Promise<SimilarHit[]> {

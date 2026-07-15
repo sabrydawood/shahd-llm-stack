@@ -24,7 +24,7 @@ import { ApplyCheckpoint } from "../Brain/Checkpoint/CheckpointReader.ts";
 import type { Checkpoint } from "../Brain/Checkpoint/CheckpointFormat.ts";
 import { PostgresCheckpointStore } from "../Foundry/PostgresCheckpointStore.ts";
 import { ActivateFromConfig } from "../Brain/ComputeBackend/BackendSelector.ts";
-import { ResolveStore } from "./FoundryEnv.ts";
+import { ResolveFoundryStores } from "./FoundryEnv.ts";
 import { ReadArg, ReadFlag } from "./ScriptArgs.ts";
 
 const CorpusMb = Number(ReadArg("--CorpusMb=", "3"));
@@ -38,20 +38,32 @@ const Steps = Number(ReadArg("--Steps=", "2000"));
 const SavePath = ReadArg("--Save=", "Checkpoints/Foundry.ckpt");
 const Measure = ReadFlag("--Measure");
 
-// Build the training corpus from the clean Filtered tier, up to a byte budget (rows arrive in id/hash
-// order — already well shuffled across repos).
-const { Store, Kind } = ResolveStore();
-const Budget = Math.round(CorpusMb * 1e6);
-const Filtered = await Store.ByTier("Filtered");
+// Build the pretraining corpus from the SEPARATED kind tables, each up to its own byte budget: code
+// (--CodeMb, default = --CorpusMb for back-compat) + optional general knowledge (--KnowledgeMb). This
+// is how a base model is composed as pure-code or code+language, with the mix controlled per kind.
+const CodeMb = Number(ReadArg("--CodeMb=", String(CorpusMb)));
+const KnowledgeMb = Number(ReadArg("--KnowledgeMb=", "0"));
+const Stores = ResolveFoundryStores();
 const Parts: string[] = [];
-let Bytes = 0;
-for (const Doc of Filtered) {
-  Parts.push(Doc.Content);
-  Bytes += Doc.Bytes;
-  if (Bytes >= Budget) break;
+async function AddKind(Which: "code" | "knowledge", BudgetMb: number): Promise<void> {
+  if (BudgetMb <= 0) return;
+  const Budget = Math.round(BudgetMb * 1e6);
+  const Docs = await Stores.Kind(Which).ByTier("Filtered", Math.max(200, Math.ceil(BudgetMb * 400))); // over-read, stop on bytes
+  let Bytes = 0;
+  let Count = 0;
+  for (const Doc of Docs) {
+    Parts.push(Doc.Content);
+    Bytes += Doc.Bytes;
+    Count++;
+    if (Bytes >= Budget) break;
+  }
+  console.log(`corpus[${Which}]: ${Count} docs, ${(Bytes / 1e6).toFixed(2)}MB`);
 }
+await AddKind("code", CodeMb);
+await AddKind("knowledge", KnowledgeMb);
+await Stores.Close();
 const CorpusText = Parts.join("\n\n");
-console.log(`corpus: ${Parts.length}/${Filtered.length} Filtered docs, ${(CorpusText.length / 1e6).toFixed(2)}MB (store=${Kind})`);
+console.log(`corpus: ${Parts.length} docs total, ${(CorpusText.length / 1e6).toFixed(2)}MB`);
 
 const EffectiveSteps = Measure ? 8 : Steps;
 const CkptName = ReadArg("--Name=", "foundry");

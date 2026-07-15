@@ -6,6 +6,7 @@
 import { InMemoryDocumentStore } from "../Foundry/FoundryBarrel.ts";
 import type { DocumentStore } from "../Foundry/FoundryBarrel.ts";
 import { PostgresDocumentStore } from "../Foundry/PostgresDocumentStore.ts";
+import { FoundryStores } from "../Foundry/FoundryStores.ts";
 import { ReadArg } from "./ScriptArgs.ts";
 
 export function DatabaseUrl(): string {
@@ -25,6 +26,11 @@ export function ResolveStore(): { Store: DocumentStore; Kind: string } {
   const Choice = ReadArg("--Store=", "") || process.env["FOUNDRY_STORE"] || (process.env["DATABASE_URL"] !== undefined ? "postgres" : "memory");
   if (Choice === "postgres") return { Store: new PostgresDocumentStore(DatabaseUrl()), Kind: "postgres" };
   return { Store: new InMemoryDocumentStore(), Kind: "memory" };
+}
+
+/** The per-kind store set (Postgres only — kind separation is a database feature). Needs DATABASE_URL. */
+export function ResolveFoundryStores(): FoundryStores {
+  return new FoundryStores(DatabaseUrl());
 }
 
 /** Web search/repo query: --Query CLI > FOUNDRY_QUERY env > the provided default. */

@@ -29,7 +29,7 @@ import type { Checkpoint } from "../Brain/Checkpoint/CheckpointFormat.ts";
 import { PostgresCheckpointStore } from "../Foundry/PostgresCheckpointStore.ts";
 import { ActivateFromConfig } from "../Brain/ComputeBackend/BackendSelector.ts";
 import { StripThinking } from "../Brain/Reasoning/ThinkingMode.ts";
-import { ResolveStore } from "./FoundryEnv.ts";
+import { ResolveFoundryStores } from "./FoundryEnv.ts";
 import { ReadArg } from "./ScriptArgs.ts";
 
 const Name = ReadArg("--Name=", "Chat");
@@ -42,28 +42,30 @@ const BlockSize = Number(ReadArg("--Block=", "256"));
 const BatchSize = Number(ReadArg("--Batch=", "8"));
 const Lr = Number(ReadArg("--Lr=", "0.002"));
 
-// 1) Owned SFT conversations — code samples from the Filtered corpus + generated persona/math/tools.
-const MaxGeneral = Number(ReadArg("--General=", "4000"));
-const { Store, Kind } = ResolveStore();
-const Filtered = await Store.ByTier("Filtered");
-const Samples: CodeSample[] = Filtered.slice(0, 4000).map((D) => ({ Lang: D.Lang, Content: D.Content }));
+// 1) SFT data from the SEPARATED kind tables, each capped independently: code (for the owned
+// language-ID task) from documents_code, real dialogue from documents_conversation. Knowledge
+// (Wikipedia) is NOT dialogue — it belongs to pretraining, not chat SFT.
+const CodeSamples = Number(ReadArg("--CodeSamples=", "4000"));
+const ConvCount = Number(ReadArg("--ConvCount=", "4000"));
+const Stores = ResolveFoundryStores();
+const CodeDocs = await Stores.Kind("code").ByTier("Filtered", CodeSamples);
+const ConvDocs = await Stores.Kind("conversation").ByTier("Filtered", ConvCount);
+const Samples: CodeSample[] = CodeDocs.map((D) => ({ Lang: D.Lang, Content: D.Content }));
 const Rng = CreateRngStreams(1234);
 const Conversations = BuildOwnedConversations(Samples, Rng.DataRng, { ArithmeticCount: 200, ThinkingCount: 120, PersonaRepeats: 25, MaxCodeConversations: 1500 });
 
-// Include REAL collected conversation data (OASST etc. — Lang "text-*", stored as "User: …\n\nAssistant:
-// …"): parse each into an SFT example so the chat model learns from real dialogue, not just the owned
-// synthetic set. This is the link that makes "collect general data -> the model talks" actually work.
+// Parse each collected conversation doc ("User: …\n\nAssistant: …") into an SFT example so the chat
+// model learns from real dialogue — the link that makes "collect conversation data -> the model talks".
 const ConvSystem = "You are Shahd, a helpful assistant.";
 let AddedGeneral = 0;
-for (const Doc of Filtered) {
-  if (AddedGeneral >= MaxGeneral) break;
-  if (!Doc.Lang.startsWith("text-")) continue;
+for (const Doc of ConvDocs) {
   const Match = /^User: ([\s\S]*?)\n\nAssistant: ([\s\S]*)$/.exec(Doc.Content);
   if (Match === null) continue;
   Conversations.push([{ Role: "System", Content: ConvSystem }, { Role: "User", Content: Match[1]! }, { Role: "Assistant", Content: Match[2]! }]);
   AddedGeneral++;
 }
-console.log(`sft: ${Conversations.length} conversations (${AddedGeneral} from collected general data; store=${Kind})`);
+await Stores.Close();
+console.log(`sft: ${Conversations.length} conversations (${CodeDocs.length} code samples + ${AddedGeneral} real dialogues from documents_conversation)`);
 
 // 2) SpecialTokenizer = byte-level BPE (trained on the conversation text) + chat/tool special tokens.
 const Specials = [...ChatTokenList, ...ToolTokenList];

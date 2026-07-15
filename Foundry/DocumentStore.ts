@@ -21,7 +21,8 @@ export type FoundryStats = {
 export interface DocumentStore {
   Upsert(Doc: DocumentRecord): Promise<void>;
   All(): Promise<DocumentRecord[]>;
-  ByTier(Tier: Tier): Promise<DocumentRecord[]>;
+  /** Documents in a tier; Limit caps the read (used for per-kind training size control). */
+  ByTier(Tier: Tier, Limit?: number): Promise<DocumentRecord[]>;
   FindSimilar(Embedding: number[], Limit: number): Promise<SimilarHit[]>;
   Count(): Promise<number>;
   /** Distinct repo/source names already ingested (used to skip re-learning). */

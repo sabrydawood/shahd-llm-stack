@@ -18,8 +18,9 @@ export class InMemoryDocumentStore implements DocumentStore {
     return [...this.Docs.values()];
   }
 
-  async ByTier(Tier: Tier): Promise<DocumentRecord[]> {
-    return [...this.Docs.values()].filter((D) => D.Tier === Tier);
+  async ByTier(Tier: Tier, Limit?: number): Promise<DocumentRecord[]> {
+    const Matching = [...this.Docs.values()].filter((D) => D.Tier === Tier);
+    return Limit !== undefined ? Matching.slice(0, Limit) : Matching;
   }
 
   async FindSimilar(Embedding: number[], Limit: number): Promise<SimilarHit[]> {

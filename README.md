@@ -23,6 +23,8 @@ bun run sample      # sample from a saved checkpoint
 bun run Scripts/TrainOnCorpus.ts     # train on the permissive seed corpus
 bun run Scripts/PhaseSevenDemo.ts    # capstone: corpus -> tools agent -> speculative -> safety
 bun run Scripts/ComputeSpike.ts 512  # benchmark TS vs Go FFI matmul
+
+bun run foundry:dashboard            # control plane: collect data -> train -> chat (http://localhost:8090)
 ```
 
 ## Architecture (layered, `Brain/`)
@@ -57,11 +59,24 @@ bun run Scripts/ComputeSpike.ts 512  # benchmark TS vs Go FFI matmul
 Full rules: [Docs/CONVENTIONS.md](Docs/CONVENTIONS.md). Design: [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md).
 File-by-file layout: [Docs/STRUCTURE.md](Docs/STRUCTURE.md). Where it's going: [Docs/ROADMAP.md](Docs/ROADMAP.md).
 
+## Data
+
+The **Data Foundry** is the tiered, inspectable dataset layer and the collection engine that fills it:
+multiple licensed sources (GitHub code, OASST/Stack Exchange dialogue, Wikipedia knowledge, GSM8K
+reasoning, local folders of books), each routed to its own per-kind table, with honest dedup
+accounting and resumable collection. Drive it from the dashboard (`bun run foundry:dashboard`).
+See [Docs/DATA-FOUNDRY.md](Docs/DATA-FOUNDRY.md).
+
 ## Safety
 
 Safety and performance are absolute priorities living in dedicated, controllable places
 (`Brain/Safety/`, `Config.Safety`, `Config.Limits`, `Config.Tools`). The model must never assist harm;
 the content filter and capability gates can be strengthened or disabled centrally via config.
+
+## Community
+
+Want to take part — ideas, data sources, testing, or just following along? Join the Discord:
+**<https://discord.gg/v4ACAn5CKf>**
 
 ## License
 

@@ -59,10 +59,14 @@ Layered low → high; imports only ever point downward.
 | `DocumentStore.ts` | The persistence interface. |
 | `InMemoryDocumentStore.ts` | Dependency-free store (tests + local runs). |
 | `PostgresDocumentStore.ts` `FoundrySchema.ts` | Postgres store via Drizzle (portable JSONB embedding; pgvector optional). |
-| `Ingest.ts` | Classify → hash → embed → upsert; plus training-text export of the Filtered tier. |
-| `WebSource.ts` `GitHubProvider.ts` `WebSearchProvider.ts` `HtmlToText.ts` | Web ingestion: GitHub-permissive (training-eligible) + general web (isolated Raw), injected fetchers. |
+| `DataKinds.ts` `FoundryStores.ts` | Per-kind separation: each kind in its own `documents_<kind>` table, sharing one connection pool. |
+| `Ingest.ts` | Classify → hash → embed → upsert (reports New vs Duplicate); plus training-text export of the Filtered tier. |
+| `WebSource.ts` `HttpBackoff.ts` `HtmlToText.ts` | Ingestion orchestrator + shared HTTP resilience (backoff/circuit-breaker) + HTML→text. |
+| `GitHubProvider.ts` `GitHubRepoProvider.ts` `LocalRepoProvider.ts` `WebSearchProvider.ts` | Code/web sources: GitHub files/whole-repos, local repos, general web (isolated Raw). |
+| `OasstProvider.ts` `GsmProvider.ts` `WikipediaProvider.ts` `LocalFolderProvider.ts` `HfParquetProvider.ts` | Dialogue / reasoning / knowledge / books sources; `HfParquetProvider` reads HF parquet by byte-range (Wikipedia dumps, Stack Exchange). |
+| `CollectionState.ts` `InMemoryCollectionStateStore.ts` `PostgresCollectionStateStore.ts` | The collection ledger: lifetime/exhausted/resume-cursor per source. |
 | `QualityReport.ts` | Aggregate stats for inspection. |
-| `Dashboard.ts` | Bun-served visual inspection UI over any store. |
+| `Dashboard.ts` `DashboardHtml.ts` `DashboardScript.ts` | Bun-served control plane (collect → train → chat) over any store. |
 | `FoundryBarrel.ts` | The public export surface. |
 
 ## Conventions

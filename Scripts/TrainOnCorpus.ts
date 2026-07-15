@@ -14,6 +14,7 @@ import { CreateRngStreams } from "../Brain/Random/SeededRng.ts";
 import { CharTokenizer } from "../Brain/Tokenizer/CharTokenizer.ts";
 import { SpecialTokenizer } from "../Brain/Tokenizer/SpecialTokenizer.ts";
 import { SpecialTokens } from "../Brain/Tokenizer/SpecialTokens.ts";
+import { FimTokens } from "../Brain/Data/FimReformat.ts";
 import { SplitAndEncodeDocuments } from "../Brain/Data/TrainValSplit.ts";
 import { InMemoryDataLoader } from "../Brain/Data/DataLoader.ts";
 import { Shahd } from "../Brain/Nn/Shahd.ts";
@@ -50,7 +51,8 @@ if (Built.Documents.length < 2) {
 // Tokenizer over ALL kept documents (vocab must cover every doc's chars — coverage is NOT leakage),
 // wrapped with an EOS special so a document boundary is a hard token in the stream, not a soft "\n\n".
 const Base = CharTokenizer.FromCorpus(Built.Documents.join("\n"));
-const Tokenizer = new SpecialTokenizer(Base, [SpecialTokens.Eos]);
+// FIM sentinels are reserved alongside EOS so a later FimFraction-enabled run doesn't shift the vocab.
+const Tokenizer = new SpecialTokenizer(Base, [SpecialTokens.Eos, ...Object.values(FimTokens)]);
 const EosId = Tokenizer.Id(SpecialTokens.Eos);
 
 const Config = LoadConfig({
@@ -69,7 +71,9 @@ console.log(`compute backend: ${ComputeChoice.Chosen}${ComputeChoice.FellBack ? 
 const Rng = CreateRngStreams(Config.Training.Seed);
 // Document-level split (shuffled) with EOS between docs — no positional train/val leak: a document can
 // never straddle the cut, and val is a random sample of whole documents, not the unshuffled tail.
-const { Train, Val } = SplitAndEncodeDocuments(Built.Documents, 0.1, Rng.DataRng, (Text) => Tokenizer.Encode(Text), EosId);
+// EncodeBase (not Encode): pretraining docs are untrusted; EOS is added structurally below, so raw
+// text is never special-split for control tokens.
+const { Train, Val } = SplitAndEncodeDocuments(Built.Documents, 0.1, Rng.DataRng, (Text) => Tokenizer.EncodeBase(Text), EosId);
 const TrainLoader = new InMemoryDataLoader(Train, Config.Model.BlockSize, Rng.DataRng);
 const ValLoader = new InMemoryDataLoader(Val, Config.Model.BlockSize, Rng.DataRng);
 const Model = new Shahd(Config, Rng.InitRng);
@@ -79,7 +83,7 @@ const RunLogger = new Logger(null, true);
 RunLogger.Log({ Event: "start", Vocab: Tokenizer.VocabSize, Params: Model.Parameters().reduce((A, P) => A + P.Size, 0), MaxSteps: Config.Schedule.MaxSteps, ConfigHash: Config.ConfigHash });
 TrainLoop(Model, Optimizer, TrainLoader, ValLoader, Config, RunLogger);
 
-SaveCheckpoint(SavePath, Model, Optimizer, Rng, { FinalStep: Config.Schedule.MaxSteps, Corpus: "seed" }, { Kind: "Char", Chars: Base.GetVocabChars(), Specials: [SpecialTokens.Eos] });
+SaveCheckpoint(SavePath, Model, Optimizer, Rng, { FinalStep: Config.Schedule.MaxSteps, Corpus: "seed" }, { Kind: "Char", Chars: Base.GetVocabChars(), Specials: [SpecialTokens.Eos, ...Object.values(FimTokens)] });
 RunLogger.Log({ Event: "saved", Path: SavePath });
 
 const Sample = Generate(Model, Tokenizer.Encode("export function "), 160, { ...DefaultSampling, Temperature: 0.7 }, Rng.SamplingRng);

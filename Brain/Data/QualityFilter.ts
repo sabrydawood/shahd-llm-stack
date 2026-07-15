@@ -72,8 +72,11 @@ export function ScoreCodeQuality(Text: string, Options: QualityOptions = {}): Qu
     // Non-ASCII (Code >= 128) is legitimate TEXT — Arabic, other scripts, emoji, unicode identifiers —
     // NOT binary. Counting it as printable+alpha keeps the filter from wrongly rejecting non-English
     // prose as "binary"; real binary is control chars (< 32, excluding tab/newline/CR), still caught.
-    if (Code === 9 || Code === 10 || Code === 13 || (Code >= 32 && Code < 127) || Code >= 128) Printable++;
-    if ((Code >= 65 && Code <= 90) || (Code >= 97 && Code <= 122) || Code >= 128) Alpha++;
+    // U+FFFD (replacement char) is excluded from both: it marks a failed decode (mojibake/corrupted
+    // bytes), so a run of them must NOT count as printable/alpha text or the binary guard is defeated.
+    const IsReplacementChar = Code === 0xfffd;
+    if (!IsReplacementChar && (Code === 9 || Code === 10 || Code === 13 || (Code >= 32 && Code < 127) || Code >= 128)) Printable++;
+    if (!IsReplacementChar && ((Code >= 65 && Code <= 90) || (Code >= 97 && Code <= 122) || Code >= 128)) Alpha++;
   }
   const PrintableFraction = Printable / Text.length;
   const AlphaFraction = Alpha / Text.length;

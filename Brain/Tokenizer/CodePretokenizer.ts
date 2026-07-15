@@ -4,6 +4,8 @@
 // CAPABILITIES.md). This is deliberately simple for Phase 1; deeper AST/structure-aware
 // segmentation is a Phase-3 lever.
 
+import { SafeBoundary } from "./Internal/SurrogateBoundary.ts";
+
 // Cap on a single pretoken chunk: an unbounded run (thousands of blank lines / trailing spaces / a
 // giant numeric literal) would make BPE's per-chunk merge loop O(n^2) — a CPU-DoS on ordinary-looking
 // input. Splitting oversized chunks keeps encode cost linear; real code chunks are far below the cap,
@@ -19,7 +21,14 @@ export function CodePretokenize(Text: string): string[] {
     if (Chunk.length <= MaxChunkChars) {
       Chunks.push(Chunk);
     } else {
-      for (let I = 0; I < Chunk.length; I += MaxChunkChars) Chunks.push(Chunk.slice(I, I + MaxChunkChars));
+      // Snap each split point off a surrogate-pair boundary — an oversized chunk (e.g. a long emoji
+      // run) must never be sliced between a high and low surrogate.
+      let Pos = 0;
+      while (Pos < Chunk.length) {
+        const End = SafeBoundary(Chunk, Math.min(Pos + MaxChunkChars, Chunk.length));
+        Chunks.push(Chunk.slice(Pos, End));
+        Pos = End;
+      }
     }
   }
   return Chunks;

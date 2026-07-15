@@ -2,10 +2,17 @@
 // eval doc, the eval number measures memorization, not generalization — so drop those train docs
 // BEFORE training (REVIEW.md: contaminated held-out perplexity makes the Phase-3 go/no-go bogus).
 
+import { CodePretokenize } from "../Tokenizer/CodePretokenizer.ts";
+
+// Code-aware windows (not a naive whitespace split): a code doc's real token boundaries are
+// identifiers/numbers/punctuation runs, so this matches the granularity contamination actually
+// leaks at (e.g. renamed-variable near-copies still share the same punctuation/number n-grams).
 function WordNgrams(Text: string, N: number): Set<string> {
-  const Words = Text.toLowerCase().split(/\s+/).filter((W) => W.length > 0);
+  const Toks = CodePretokenize(Text.toLowerCase())
+    .map((T) => T.trim())
+    .filter((T) => T.length > 0);
   const Out = new Set<string>();
-  for (let I = 0; I + N <= Words.length; I++) Out.add(Words.slice(I, I + N).join(" "));
+  for (let I = 0; I + N <= Toks.length; I++) Out.add(Toks.slice(I, I + N).join(" "));
   return Out;
 }
 

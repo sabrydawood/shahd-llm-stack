@@ -13,6 +13,7 @@ import { TrainBpe } from "../Brain/Tokenizer/BpeMergeTrainer.ts";
 import { BytePairEncoder } from "../Brain/Tokenizer/BytePairEncoder.ts";
 import { SpecialTokenizer } from "../Brain/Tokenizer/SpecialTokenizer.ts";
 import { SpecialTokens } from "../Brain/Tokenizer/SpecialTokens.ts";
+import { FimTokens } from "../Brain/Data/FimReformat.ts";
 import { SplitAndEncodeDocuments } from "../Brain/Data/TrainValSplit.ts";
 import { DedupedIndices } from "../Brain/Data/NearDedup.ts";
 import { InMemoryDataLoader } from "../Brain/Data/DataLoader.ts";
@@ -29,6 +30,11 @@ import { PostgresCheckpointStore } from "../Foundry/PostgresCheckpointStore.ts";
 import { ActivateFromConfig } from "../Brain/ComputeBackend/BackendSelector.ts";
 import { ResolveFoundryStores } from "./FoundryEnv.ts";
 import { ReadArg, ReadFlag } from "./ScriptArgs.ts";
+
+// Specials reserved above the BPE vocab: EOS plus the FIM sentinels (reserved unconditionally so a
+// later FimFraction-enabled run — or resume of one — doesn't shift the vocab / token ids).
+const FimSpecials = Object.values(FimTokens);
+const NumSpecials = 1 + FimSpecials.length;
 
 const CorpusMb = Number(ReadArg("--CorpusMb=", "3"));
 const NumMerges = Number(ReadArg("--Merges=", "256")); // vocab = 256 + merges
@@ -99,10 +105,10 @@ if (CkptStore !== null && !Measure && !Fresh) {
   const State = (Existing?.TokenizerState ?? null) as BpeTokenizerState | null;
   if (Existing !== null && State !== null && State.Kind === "Bpe" && Array.isArray(State.Merges)) {
     const M = Existing.Config.Model;
-    // VocabSize must also match: an EOS special adds 1 above the BPE vocab (256 + merges). A pre-EOS
-    // checkpoint (no +1) is a different architecture — reject it here so we start fresh instead of
-    // crashing later in ApplyCheckpoint's VocabSize shape check.
-    const ArchMatch = M.EmbedDim === EmbedDim && M.NumLayers === NumLayers && M.NumHeads === NumHeads && M.BlockSize === BlockSize && M.VocabSize === 256 + State.Merges.length + 1;
+    // VocabSize must also match: EOS + the reserved FIM sentinels add NumSpecials above the BPE vocab
+    // (256 + merges). A checkpoint predating that offset is a different architecture — reject it here
+    // so we start fresh instead of crashing later in ApplyCheckpoint's VocabSize shape check.
+    const ArchMatch = M.EmbedDim === EmbedDim && M.NumLayers === NumLayers && M.NumHeads === NumHeads && M.BlockSize === BlockSize && M.VocabSize === 256 + State.Merges.length + NumSpecials;
     const Match = ArchMatch && (ResumeFlag || Existing.Config.Schedule.MaxSteps === EffectiveSteps);
     const DoneStep = Number((Existing.Meta as Record<string, unknown>)["Step"] ?? 0);
     if (Match && DoneStep < EffectiveSteps) Resume = { Ckpt: Existing, Step: DoneStep, Merges: State.Merges };
@@ -114,7 +120,7 @@ if (CkptStore !== null && !Measure && !Fresh) {
 const T0 = Date.now();
 const Bpe = Resume !== null ? { Merges: Resume.Merges } : TrainBpe(CorpusText, NumMerges);
 const BaseTok = new BytePairEncoder(Bpe);
-const Tokenizer = new SpecialTokenizer(BaseTok, [SpecialTokens.Eos]);
+const Tokenizer = new SpecialTokenizer(BaseTok, [SpecialTokens.Eos, ...FimSpecials]);
 const EosId = Tokenizer.Id(SpecialTokens.Eos);
 console.log(`bpe: ${Bpe.Merges.length} merges -> vocab ${Tokenizer.VocabSize}${Resume !== null ? " (reused from checkpoint)" : `; trained in ${((Date.now() - T0) / 1000).toFixed(1)}s`}`);
 
@@ -134,7 +140,9 @@ const Config = LoadConfig({
 const ComputeChoice = ActivateFromConfig(Config);
 const Rng = CreateRngStreams(Config.Training.Seed);
 // Document-level split (shuffled) with EOS between docs — no positional train/val leak.
-const { Train, Val } = SplitAndEncodeDocuments(Docs, 0.1, Rng.DataRng, (Text) => Tokenizer.Encode(Text), EosId);
+// EncodeBase (not Encode): pretraining docs are untrusted; EOS is added structurally below, so raw
+// text is never special-split for control tokens.
+const { Train, Val } = SplitAndEncodeDocuments(Docs, 0.1, Rng.DataRng, (Text) => Tokenizer.EncodeBase(Text), EosId);
 console.log(`split: ${Train.length} train + ${Val.length} val tokens (document-level, shuffled)`);
 const TrainLoader = new InMemoryDataLoader(Train, Config.Model.BlockSize, Rng.DataRng);
 const ValLoader = new InMemoryDataLoader(Val, Config.Model.BlockSize, Rng.DataRng);
@@ -167,7 +175,7 @@ if (Measure) {
 // and re-running resumes from the last saved checkpoint (nothing done is thrown away).
 const CheckEvery = Math.max(50, Math.floor(EffectiveSteps / 20)); // ~20 saves across the run
 function BuildAt(Step: number): Checkpoint {
-  return BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: EffectiveSteps, Step, Corpus: "foundry-filtered" }, { Kind: "Bpe", Merges: Bpe.Merges, Specials: [SpecialTokens.Eos] });
+  return BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: EffectiveSteps, Step, Corpus: "foundry-filtered" }, { Kind: "Bpe", Merges: Bpe.Merges, Specials: [SpecialTokens.Eos, ...FimSpecials] });
 }
 for (let Start = StartStep; Start < EffectiveSteps; Start += CheckEvery) {
   const End = Math.min(Start + CheckEvery, EffectiveSteps);

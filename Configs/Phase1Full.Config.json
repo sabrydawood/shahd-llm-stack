@@ -36,6 +36,6 @@
   },
   "Tokenizer": {
     "Kind": "Bpe",
-    "MergesPath": "Corpus/merges.json"
+    "MergesPath": "Corpus/Merges.json"
   }
 }

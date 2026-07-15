@@ -56,6 +56,9 @@ export function BuildCorpus(Sources: SourceDocument[], Options: CorpusBuilderOpt
   const DedupThreshold = Options.DedupThreshold ?? 0.8;
   const Separator = Options.DocumentSeparator ?? "\n\n";
   const DefaultIngestedAt = Options.IngestedAt ?? "unspecified";
+  // Byte counts must be actual UTF-8 bytes, not UTF-16 code units (string.length) — non-ASCII text
+  // (Arabic, CJK, emoji) undercounts badly with .length, skewing manifest provenance and corpus stats.
+  const Utf8Encoder = new TextEncoder();
 
   // 1) License allowlist — the only documents legally safe to train on.
   const Permissive = Sources.filter((D) => IsPermissive(D.License));
@@ -92,7 +95,7 @@ export function BuildCorpus(Sources: SourceDocument[], Options: CorpusBuilderOpt
       Content = ToFim(Content, Cut1, Cut2, Options.FimMode ?? "Psm");
       FimRewritten++;
     }
-    Manifest.Add({ Source: D.Source, License: D.License, Path: D.Path, Bytes: Content.length, IngestedAt: D.IngestedAt ?? DefaultIngestedAt });
+    Manifest.Add({ Source: D.Source, License: D.License, Path: D.Path, Bytes: Utf8Encoder.encode(Content).length, IngestedAt: D.IngestedAt ?? DefaultIngestedAt });
     return Content;
   });
 
@@ -105,7 +108,7 @@ export function BuildCorpus(Sources: SourceDocument[], Options: CorpusBuilderOpt
     DroppedContaminated,
     FimRewritten,
     Kept: Documents.length,
-    TotalBytes: Text.length,
+    TotalBytes: Utf8Encoder.encode(Text).length,
   };
   return { Documents, Manifest, Stats, Text };
 }

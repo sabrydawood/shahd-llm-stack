@@ -27,7 +27,9 @@ export class InMemoryDataLoader implements DataLoader {
 
   GetSequence(): Sequence {
     const MaxStart = this.Data.length - this.BlockSize - 1;
-    const Start = Math.floor(this.Rng.NextFloat() * MaxStart);
+    // +1 so the final valid start position (Start === MaxStart) is reachable — NextFloat() is [0, 1),
+    // so without it Start could never land on MaxStart itself.
+    const Start = Math.floor(this.Rng.NextFloat() * (MaxStart + 1));
     const Ids = this.Data.slice(Start, Start + this.BlockSize);
     const Targets = this.Data.slice(Start + 1, Start + 1 + this.BlockSize);
     return { Ids, Targets };

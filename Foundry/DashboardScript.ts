@@ -44,7 +44,16 @@ export const DashboardScript = `
 
  // ── Overview ──
  async function loadOverview(){try{kindStats=await (await fetch('/api/kinds')).json();}catch(e){kindStats=[];}renderKinds();
-  try{var m=await (await fetch('/api/model')).json();renderModelCard(m);}catch(e){}}
+  try{var m=await (await fetch('/api/model')).json();renderModelCard(m);}catch(e){}
+  try{renderLedger(await (await fetch('/api/collection')).json());}catch(e){}}
+ function renderLedger(rows){var el=Q('ov-ledger');if(!el)return;
+  if(!rows||!rows.length){el.innerHTML='<div class="empty">nothing collected yet</div>';return;}
+  el.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+   +'<tr style="color:var(--mut);text-align:left"><th style="padding:4px 8px">Source</th><th>Kind</th><th class="tnum">Collected</th><th>State</th><th>Cursor</th></tr>'
+   +rows.map(function(r){var st=r.Exhausted?'<span style="color:var(--mut)">complete</span>':'<span style="color:var(--conv)">growing</span>';
+    var cur=(r.Cursor&&r.Cursor!=='{}')?H(r.Cursor):'—';
+    return '<tr style="border-top:1px solid var(--line)"><td style="padding:4px 8px;font-family:var(--mono)">'+H(r.SourceKey)+'</td><td>'+pillKind(r.Kind)+'</td><td class="tnum">'+fmtN(r.Collected)+'</td><td>'+st+'</td><td style="font-family:var(--mono);color:var(--faint)">'+cur+'</td></tr>';}).join('')
+   +'</table></div>';}
  function renderKinds(){
   var totalDocs=0,trainable=0;kindStats.forEach(function(k){totalDocs+=k.Count;trainable+=k.Filtered;});
   Q('ov-docs').textContent=fmtN(totalDocs);

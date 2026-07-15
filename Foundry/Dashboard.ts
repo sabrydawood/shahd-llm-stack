@@ -16,6 +16,7 @@ import type { DocumentStore, DocumentFilter, DocumentPage, FoundryStats } from "
 import type { DocumentRecord } from "./DocumentRecord.ts";
 import type { DataKind } from "./DataKinds.ts";
 import { IsDataKind } from "./DataKinds.ts";
+import type { CollectionState } from "./CollectionState.ts";
 import type { LearnSettings, LearnEvent, LearnFn, TrainSettings, TrainEvent, TrainFn } from "./DashboardTypes.ts";
 import type { KindStat } from "./FoundryStores.ts";
 import type { RepoLevel } from "./RepoQuality.ts";
@@ -36,6 +37,7 @@ export type DashboardOptions = {
   Checkpoints?: () => Promise<CheckpointSummary[]>; // list saved models (the chat-model picker)
   LoadModel?: (Name: string) => Promise<void>; // switch the chat model to a saved checkpoint
   KindStats?: () => Promise<KindStat[]>; // per-kind document counts/bytes (the data-separation breakdown)
+  Collection?: () => Promise<CollectionState[]>; // the collection ledger: lifetime/exhausted/cursor per source
   // Data browser (per-kind, paginated) — kind-aware so it reaches every documents_<kind> table, not
   // just the one InspectStore the panel is built with. All injected so Dashboard.ts stays DB-agnostic.
   Browse?: (Kind: DataKind, Filter: DocumentFilter, Offset: number, Limit: number) => Promise<DocumentPage>;
@@ -201,6 +203,7 @@ export function CreateDashboardParts(Store: DocumentStore, Learn?: LearnFn, Opti
     if (Path === "/api/model") return Json(Options.GetModel?.() ?? null);
     if (Path === "/api/checkpoints") return Json((await Options.Checkpoints?.()) ?? []);
     if (Path === "/api/kinds") return Json((await Options.KindStats?.()) ?? []);
+    if (Path === "/api/collection") return Json((await Options.Collection?.()) ?? []);
     if (Path === "/api/config") return Json({ learnEnabled: Learn !== undefined, trainEnabled: Options.Train !== undefined, chatEnabled: Options.Chat !== undefined, running: Job.Running });
 
     if (Path === "/api/documents") {

@@ -15,12 +15,12 @@ test("WikiDumpSource.MapRow builds a knowledge doc and skips stubs", () => {
 });
 
 test("StackExchangeSource.MapRow builds a Q&A conversation turn and skips trivial pairs", () => {
-  const Doc = StackExchangeSource.MapRow({ INSTRUCTION: "How do I reverse a list in Python?", RESPONSE: "Use list.reverse() to reverse in place, or reversed(list) for an iterator.", SOURCE: "stackexchange-stackoverflow" })!;
+  const Doc = StackExchangeSource.MapRow({ INSTRUCTION: "How do I reverse a list in Python?", RESPONSE: "Use list.reverse() to reverse in place, or reversed(list) for an iterator.", SOURCE: "stackexchange-stackoverflow" }, "all")!;
   expect(Doc).not.toBeNull();
   expect(Doc.Content).toContain("User: How do I reverse");
   expect(Doc.Content).toContain("Assistant: Use list.reverse()");
   expect(Doc.Provenance).toBe("stackexchange:stackexchange-stackoverflow");
-  expect(StackExchangeSource.MapRow({ INSTRUCTION: "hi", RESPONSE: "yo" })).toBeNull(); // too trivial
+  expect(StackExchangeSource.MapRow({ INSTRUCTION: "hi", RESPONSE: "yo" }, "all")).toBeNull(); // too trivial
   expect(StackExchangeSource.Kind).toBe("conversation");
 });
 

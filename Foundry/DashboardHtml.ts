@@ -49,6 +49,7 @@ export const DashboardHtml = `<!doctype html><html lang="en"><head><meta charset
      <div class="card"><h3>Data by kind <span class="r">physically separate tables</span></h3><div id="ov-kinds"><div class="empty">loading…</div></div></div>
      <div class="card"><h3>Loaded model</h3><div id="ov-model"><div class="empty">no model loaded</div></div></div>
     </div>
+    <div class="card" style="margin-top:14px"><h3>Collection ledger <span class="r">lifetime progress per source</span></h3><div id="ov-ledger"><div class="empty">nothing collected yet</div></div></div>
    </section>
 
    <section class="view" id="view-collect">

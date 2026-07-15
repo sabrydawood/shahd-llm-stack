@@ -431,6 +431,7 @@ StartDashboard(InspectStore, Port, Learn, {
   Checkpoints: ListCheckpoints,
   LoadModel: (Name: string) => ReloadModel(Name),
   KindStats: () => (Stores !== null ? Stores.Stats() : Promise.resolve([])),
+  Collection: () => CollState().All(),
   // Data browser + cleanup: kind-aware, so it reaches every documents_<kind> table (Postgres) or the
   // single fallback store (in-memory). Each op resolves the right store and delegates to it.
   Browse: (Kind, Filter, Offset, Limit) => KindStore(Kind).Query(Filter, Offset, Limit),

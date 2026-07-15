@@ -59,6 +59,7 @@ export const DashboardHtml = `<!doctype html><html lang="en"><head><meta charset
      <div class="s" data-src="oasst" onclick="pickSource('oasst')"><b>OASST <span class="pill conv">conversation</span></b><small>Apache dialogue · multilingual</small></div>
      <div class="s" data-src="oasst2" onclick="pickSource('oasst2')"><b>OASST2 <span class="pill conv">conversation</span></b><small>more Apache dialogue</small></div>
      <div class="s" data-src="wikipedia" onclick="pickSource('wikipedia')"><b>Wikipedia <span class="pill know">knowledge</span></b><small>CC-BY-SA · Arabic + English</small></div>
+     <div class="s" data-src="gsm8k" onclick="pickSource('gsm8k')"><b>GSM8K <span class="pill" style="background:var(--mut)">instruction</span></b><small>MIT · math reasoning w/ steps</small></div>
     </div>
     <div class="card" style="margin-bottom:14px">
      <div class="row c3">

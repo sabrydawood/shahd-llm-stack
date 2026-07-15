@@ -44,6 +44,8 @@ export { CreateOasstProvider, Oasst1Url, Oasst2Url } from "./OasstProvider.ts";
 export type { OasstOptions } from "./OasstProvider.ts";
 export { CreateWikipediaProvider } from "./WikipediaProvider.ts";
 export type { WikipediaOptions } from "./WikipediaProvider.ts";
+export { CreateGsmProvider, GsmRowToDoc, GsmSplits } from "./GsmProvider.ts";
+export type { GsmOptions } from "./GsmProvider.ts";
 export { FetchWithBackoff, CircuitBreaker, HttpError, RetryAfterToMs, IsTransient } from "./HttpBackoff.ts";
 export type { BackoffOptions } from "./HttpBackoff.ts";
 export type { CollectionState, CollectionStateStore } from "./CollectionState.ts";

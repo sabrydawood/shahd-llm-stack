@@ -5,7 +5,7 @@
 // run finishes it is hot-reloaded into the chat model with no restart.
 //   bun run foundry:dashboard      # then open http://localhost:8090
 
-import { StartDashboard, IngestDocuments, CreateGitHubRepoProvider, CreateLocalRepoProvider, CreateOasstProvider, CreateWikipediaProvider, Oasst2Url, InMemoryDocumentStore, InMemoryCollectionStateStore, ComputeExhausted } from "../Foundry/FoundryBarrel.ts";
+import { StartDashboard, IngestDocuments, CreateGitHubRepoProvider, CreateLocalRepoProvider, CreateOasstProvider, CreateWikipediaProvider, CreateGsmProvider, Oasst2Url, InMemoryDocumentStore, InMemoryCollectionStateStore, ComputeExhausted } from "../Foundry/FoundryBarrel.ts";
 import type { CollectionStateStore } from "../Foundry/FoundryBarrel.ts";
 import type { LearnFn, WebProvider, RepoIngestInfo, LearnEvent, TrainFn, TrainSettings, TrainEvent, SourceInput, DataKind, DocumentStore } from "../Foundry/FoundryBarrel.ts";
 import type { ChatStore, ChatMessage } from "../Foundry/ChatStore.ts";
@@ -192,8 +192,10 @@ const Chat = new ChatService(Chats, Stream);
 // STAGE 1 — Collect data (the provider-backed Learn runner).
 const Learn: LearnFn = async (Settings, OnEvent, Signal) => {
   // Route this run to the kind table for its source: oasst -> conversation, wikipedia -> knowledge,
-  // github/local -> code. Everything collected this run lands in that one physically-separate table.
-  const SourceKind: DataKind = Settings.Source === "oasst" || Settings.Source === "oasst2" ? "conversation" : Settings.Source === "wikipedia" ? "knowledge" : "code";
+  // gsm8k -> instruction (reasoning), github/local -> code. Everything collected this run lands in that
+  // one physically-separate table.
+  const SourceKind: DataKind =
+    Settings.Source === "oasst" || Settings.Source === "oasst2" ? "conversation" : Settings.Source === "wikipedia" ? "knowledge" : Settings.Source === "gsm8k" ? "instruction" : "code";
   const CollectStore = KindStore(SourceKind);
   const Learned = new Set(Settings.SkipLearned ? await CollectStore.Sources() : []);
   const Skip = (Repo: string): boolean => Learned.has(Repo);
@@ -231,6 +233,8 @@ const Learn: LearnFn = async (Settings, OnEvent, Signal) => {
     Providers.push(CreateOasstProvider({ Url: Oasst2Url, OnRepoStart, OnRepoReady }));
   } else if (Settings.Source === "wikipedia") {
     Providers.push(CreateWikipediaProvider({ OnRepoStart, OnRepoReady }));
+  } else if (Settings.Source === "gsm8k") {
+    Providers.push(CreateGsmProvider({ OnRepoStart, OnRepoReady }));
   } else {
     if (Settings.Source !== "local") {
       Providers.push(CreateGitHubRepoProvider({ Token: GitHubToken(), MinLevel: Settings.MinLevel, MaxFilesPerRepo: Settings.MaxFilesPerRepo, MaxBytesPerRepo: Settings.MaxBytesPerRepo, MaxContentBytesPerRepo: Settings.MaxContentBytes, SkipRepo: Skip, OnRepoStart, OnRepo, OnRepoReady }));

@@ -93,7 +93,7 @@ function ToNum(Value: unknown, Default: number): number {
 }
 
 function IsLearnSource(Value: unknown): Value is LearnSettings["Source"] {
-  return Value === "github" || Value === "local" || Value === "both" || Value === "oasst" || Value === "oasst2" || Value === "wikipedia";
+  return Value === "github" || Value === "local" || Value === "both" || Value === "oasst" || Value === "oasst2" || Value === "wikipedia" || Value === "gsm8k";
 }
 
 function ParseSettings(Body: Record<string, unknown>): LearnSettings {

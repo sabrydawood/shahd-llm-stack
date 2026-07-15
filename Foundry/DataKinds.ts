@@ -28,6 +28,8 @@ export function KindForProvider(ProviderName: string): DataKind {
       return "conversation";
     case "wikipedia":
       return "knowledge";
+    case "gsm8k":
+      return "instruction";
     case "web-search":
       return "web";
     default:

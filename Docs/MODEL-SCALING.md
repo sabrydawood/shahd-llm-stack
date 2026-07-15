@@ -20,7 +20,7 @@ Head dimension is 64 (standard) except the two smallest tiers. **The columns mat
 panel exactly**, so each row is a ready preset. `Batch` and `Steps` are the Chinchilla ~20-tokens/param
 **floor** (`steps = tokens ÷ (batch × context)`) — a lower bound; real training uses several times
 more. `Corpus MB` is a practical starting size — we currently have ~60 MB collected, so the larger
-tiers need much more data (see §2).
+tiers need much more data (see §3).
 
 | Tier | Embed | Layers | Heads | Context | Vocab | Batch | Steps | Corpus MB | Params | Trains on |
 |------|-------|--------|-------|---------|-------|-------|-------|-----------|--------|-----------|
@@ -49,7 +49,52 @@ exactly why the larger tiers need a GPU: big batches cut the step count and each
 
 ---
 
-## 2. Real-world large models
+## 2. From a base model to a chat model (SFT)
+
+A base (pretrained) model only **autocompletes**. Making it one that **replies and follows a
+conversation** is a second stage — **SFT (instruction/chat tuning)** — plus optional tool-use and
+thinking on top. Three stages, each reading a different **data kind** (kept in separate tables):
+
+| Stage | What it adds | Data kind(s) | How (dashboard) |
+|-------|--------------|--------------|-----------------|
+| Pretrain | language + code patterns | code (+ knowledge) | Train ▸ Mode **Pretrain** |
+| **SFT (chat)** | reply in the chat format, call tools, think, then stop | **conversation** (+ code) | Train ▸ Mode **Chat / SFT** |
+| RL (optional) | prefer better answers | conversation | rejection sampling |
+
+**The single most important input for "talks well" is conversation data** (OASST/OASST2 dialogue),
+used in the SFT stage. More + more diverse dialogue → better conversational behavior, up to the
+model's scale ceiling.
+
+### Chat-model recipe by tier
+
+| Chat tier | Base tier | SFT steps | Conversation examples | Realistically expect |
+|-----------|-----------|-----------|-----------------------|----------------------|
+| Seed-chat | Seed/Nano | ~500–800 | 1k–5k | learns the FORMAT (replies + stops); output mostly incoherent |
+| Micro-chat | Micro | ~2k–4k | 10k–50k | short on-topic replies on seen patterns; frequent errors |
+| Mini-chat | Mini | ~8k–15k | 50k–200k | simple coherent Q&A + tool calls; not fluent |
+| Small-chat | Small | ~20k+ | 200k–1M | basic assistant on narrow tasks (GPT-2-class); needs a GPU |
+| *fluent + senior-level code* | *7B+* | *100k+* | *millions* | *emergent at scale — not reachable from scratch on modest hardware* |
+
+### The data mix (per kind), set from the dashboard
+
+Data types live in separate tables, so a run picks how much of each:
+
+- **Pretrain**: `Code MB` (documents_code) + `Knowledge MB` (documents_knowledge). Code-only for a
+  code base; add knowledge for general language.
+- **Chat (SFT)**: `Conversations` (documents_conversation) + `Code samples` (documents_code). Set
+  Code samples to 0 for a pure-chat model; set Conversations to 0 for a pure-code assistant.
+
+### Honest ceiling
+
+At the tiers that run on modest hardware (Seed–Mini), SFT teaches the **format + the tool/thinking
+mechanism** — the model replies, stops, and can call tools — but it will **not** be fluent or write
+senior-level code; that is emergent at billions of parameters + trillions of tokens (see §3). The
+architecture is complete, so under-training is acceptable; to improve conversation within the ceiling,
+collect **more + more diverse conversation data** and raise SFT steps + `Conversations`.
+
+---
+
+## 3. Real-world large models
 
 Inference weight memory is exact math: `bytes-per-parameter × parameters`. FP16 = 2 B, INT8 = 1 B,
 INT4 ≈ 0.5 B. Training data uses the Chinchilla compute-optimal rule (~20 tokens/parameter); modern
@@ -74,7 +119,7 @@ sharded across GPUs (ZeRO / FSDP) — even though its FP16 weights (14 GB) run i
 
 ---
 
-## 3. Context length and the KV-cache
+## 4. Context length and the KV-cache
 
 Long context (256k, 1M) is mostly a **KV-cache memory** problem, not a weights problem. During
 generation the model caches keys+values for every token:
@@ -100,7 +145,7 @@ more memory than the model weights themselves.
 
 ---
 
-## 4. Rules of thumb
+## 5. Rules of thumb
 
 ```
 Weights (inference)   = bytes-per-param × params          (FP16 = 2 B, INT4 ≈ 0.5 B)

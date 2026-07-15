@@ -1,13 +1,13 @@
 // Serialize a training state to a self-describing checkpoint file (weights + optimizer m/v/step
 // + RNG stream states + full config + hash + tokenizer state + meta).
 
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, renameSync, copyFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Shahd } from "../Nn/Shahd.ts";
 import type { Optimizer } from "../Optim/OptimBarrel.ts";
 import type { RngStreams } from "../Random/SeededRng.ts";
 import type { ResolvedConfig, ShahdConfig } from "../Config/ConfigTypes.ts";
-import { CheckpointFormatVersion, EncodeFloat64 } from "./CheckpointFormat.ts";
+import { CheckpointFormatVersion, EncodeFloat64, ChecksumPayload } from "./CheckpointFormat.ts";
 import type { Checkpoint, TensorState } from "./CheckpointFormat.ts";
 
 function ExtractShahdConfig(Config: ResolvedConfig): ShahdConfig {
@@ -39,16 +39,17 @@ export function BuildCheckpoint(
     Data: EncodeFloat64(P.Data),
   }));
 
+  const OptimizerDump = {
+    M: Optimizer.M.map(EncodeFloat64),
+    V: Optimizer.V.map(EncodeFloat64),
+    StepCount: Optimizer.StepCount,
+  };
   return {
     FormatVersion: CheckpointFormatVersion,
     ConfigHash: Model.Config.ConfigHash,
     Config: ExtractShahdConfig(Model.Config),
     Params,
-    Optimizer: {
-      M: Optimizer.M.map(EncodeFloat64),
-      V: Optimizer.V.map(EncodeFloat64),
-      StepCount: Optimizer.StepCount,
-    },
+    Optimizer: OptimizerDump,
     Rng: {
       Init: Rng.InitRng.GetState(),
       Data: Rng.DataRng.GetState(),
@@ -57,14 +58,29 @@ export function BuildCheckpoint(
     },
     TokenizerState,
     Meta,
+    Checksum: ChecksumPayload(Params, OptimizerDump),
   };
 }
 
-/** Write an already-built checkpoint object to a file (creating parent dirs). */
+/** Write an already-built checkpoint object to a file (creating parent dirs) ATOMICALLY: serialize to a
+ *  unique temp file first, then rename it over the target (an atomic same-filesystem replace). This is
+ *  the crash-safety guarantee the save loop depends on — a kill/power-loss/OOM mid-write leaves the temp
+ *  partial and the real file untouched, so the last good checkpoint is always intact (never a truncated
+ *  JSON that makes the whole run unresumable). The previous good checkpoint is also rotated to `.bak`
+ *  first, so even a complete-but-corrupt write leaves a recoverable prior copy. */
 export function WriteCheckpointObject(Path: string, Ckpt: Checkpoint): void {
   const Dir = dirname(Path);
   if (Dir !== "" && !existsSync(Dir)) mkdirSync(Dir, { recursive: true });
-  writeFileSync(Path, JSON.stringify(Ckpt));
+  const Tmp = `${Path}.tmp.${process.pid}`;
+  writeFileSync(Tmp, JSON.stringify(Ckpt));
+  if (existsSync(Path)) {
+    try {
+      copyFileSync(Path, `${Path}.bak`); // keep the last good copy before overwriting
+    } catch {
+      // best-effort backup — never block the save on it
+    }
+  }
+  renameSync(Tmp, Path); // atomic replace: readers see either the old file or the new one, never partial
 }
 
 export function SaveCheckpoint(

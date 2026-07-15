@@ -10,9 +10,17 @@ export type SplitThought = { Thinking: string; Answer: string; HadThinking: bool
 /** Separate a generation into its <|think|>…<|endthink|> block and the visible answer. */
 export function SplitThinking(Text: string): SplitThought {
   const Start = Text.indexOf(ChatTokens.Think);
-  const End = Text.indexOf(ChatTokens.EndThink);
-  if (Start === -1 || End === -1 || End < Start) {
+  if (Start === -1) {
     return { Thinking: "", Answer: Text.trim(), HadThinking: false };
+  }
+  const End = Text.indexOf(ChatTokens.EndThink, Start + ChatTokens.Think.length);
+  if (End === -1) {
+    // Unclosed thinking (generation cut off mid-scratchpad — common for a small model / small token
+    // budget). Everything from <|think|> onward is incomplete reasoning: HIDE it, never leak it as the
+    // answer. The visible answer is only whatever preceded the (now-dangling) think sentinel.
+    const Thinking = Text.slice(Start + ChatTokens.Think.length).trim();
+    const Answer = Text.slice(0, Start).trim();
+    return { Thinking, Answer, HadThinking: true };
   }
   const Thinking = Text.slice(Start + ChatTokens.Think.length, End).trim();
   const Answer = (Text.slice(0, Start) + Text.slice(End + ChatTokens.EndThink.length)).trim();

@@ -4,6 +4,8 @@ import { NearDuplicateGroups, DedupedIndices } from "../Brain/Data/NearDedup.ts"
 import { ScoreCodeQuality } from "../Brain/Data/QualityFilter.ts";
 import { ToFim, FromFim, FimTokens } from "../Brain/Data/FimReformat.ts";
 import { Decontaminate } from "../Brain/Data/Decontamination.ts";
+import { SplitAndEncodeDocuments } from "../Brain/Data/TrainValSplit.ts";
+import { SeededRng } from "../Brain/Random/SeededRng.ts";
 
 test("license manifest filters to permissive and summarizes", () => {
   const Manifest = new LicenseManifest();
@@ -40,6 +42,33 @@ test("FIM PSM round-trips to the original", () => {
   expect(Fim).toContain(FimTokens.Prefix);
   expect(Fim).toContain(FimTokens.Middle);
   expect(FromFim(Fim)).toBe(Doc);
+});
+
+test("SplitAndEncodeDocuments splits at the document boundary (no leak) with EOS separators", () => {
+  const Docs = ["alpha alpha", "beta beta", "gamma gamma", "delta delta", "epsilon epsilon", "zeta zeta"];
+  const EosId = 9999;
+  const Encode = (T: string): number[] => Array.from(T).map((C) => C.charCodeAt(0)); // deterministic char encode
+  const { Train, Val } = SplitAndEncodeDocuments(Docs, 0.25, new SeededRng(7), Encode, EosId);
+  expect(Train.length).toBeGreaterThan(0);
+  expect(Val.length).toBeGreaterThan(0);
+  expect(Train[Train.length - 1]).toBe(EosId); // every doc ends in EOS
+  expect(Val[Val.length - 1]).toBe(EosId);
+  const ToDocs = (Stream: number[]): string[] => {
+    const Out: string[] = [];
+    let Cur = "";
+    for (const Id of Stream) {
+      if (Id === EosId) { Out.push(Cur); Cur = ""; } else Cur += String.fromCharCode(Id);
+    }
+    return Out;
+  };
+  const TrainDocs = new Set(ToDocs(Train));
+  const ValDocs = ToDocs(Val);
+  for (const D of ValDocs) expect(TrainDocs.has(D)).toBe(false); // NO leak: disjoint document sets
+  expect(TrainDocs.size + ValDocs.length).toBe(Docs.length); // every document accounted for
+});
+
+test("SplitAndEncodeDocuments requires at least two documents", () => {
+  expect(() => SplitAndEncodeDocuments(["only one"], 0.1, new SeededRng(1), (T) => [T.length], 0)).toThrow(/>= 2/);
 });
 
 test("decontamination removes train docs overlapping the eval set", () => {

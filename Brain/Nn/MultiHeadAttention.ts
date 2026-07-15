@@ -40,13 +40,16 @@ export class MultiHeadAttention {
   }
 
   Forward(X: Tensor): Tensor {
-    // Project each KV head once (shared by its query group).
-    const Ks: Tensor[] = [];
+    // Project each KV head once (shared by its query group), and transpose K ONCE here — under GQA the
+    // same K feeds GroupSize query heads, so re-transposing it inside the per-head loop was redundant
+    // work (and redundant autograd nodes) that partly cancelled GQA's own compute saving. The shared
+    // transpose node correctly accumulates gradient from every query head in the group.
+    const KsT: Tensor[] = [];
     const Vs: Tensor[] = [];
     for (let Kv = 0; Kv < this.KvHeads; Kv++) {
       let K = MatMul(X, this.WkHeads[Kv]);
       if (this.UseRope) K = ApplyRope(K, 0);
-      Ks.push(K);
+      KsT.push(Transpose(K));
       Vs.push(MatMul(X, this.WvHeads[Kv]));
     }
 
@@ -55,7 +58,7 @@ export class MultiHeadAttention {
       const KvIndex = Math.floor(H / this.GroupSize);
       let Q = MatMul(X, this.WqHeads[H]); // [T, HeadDim]
       if (this.UseRope) Q = ApplyRope(Q, 0);
-      let Scores = MatMul(Q, Transpose(Ks[KvIndex])); // [T, T]
+      let Scores = MatMul(Q, KsT[KvIndex]); // [T, T] — reuse the shared transpose
       Scores = Scale(Scores, this.AttentionScale);
       Scores = CausalMask(Scores);
       const Weights = SoftmaxRows(Scores);

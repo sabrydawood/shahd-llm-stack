@@ -34,21 +34,56 @@ export function RenderChat(Messages: ChatMessage[], AddAssistantCue = true): str
 
 export type TrainingSequence = { Ids: number[]; LossMask: boolean[] };
 
+// The SINGLE id-building core, shared by training (RenderForTraining) and serving (RenderChatToIds)
+// so their tokenization can NEVER drift (DRY-strict + no train/serve skew — a mismatch would silently
+// break the model). One message becomes: role marker (a special id) + content + end-of-turn (a special
+// id). The role/turn markers are the ONLY boundary tokens, produced only via Id().
+//
+// Content encoding is TRUST-based (the control/data channel separation):
+//   • Assistant content is the model's OWN output — it legitimately contains control tokens
+//     (<|tool_call|>, <|think|>…) that MUST stay atomic for training AND for encode/decode round-trip
+//     fidelity of the conversation history. It is encoded with the special-aware Encode().
+//   • System + User content is EXTERNAL/untrusted (system prompt we author, but crucially USER messages
+//     and TOOL RESULTS which arrive as User turns). It is encoded with EncodeBase() — the base
+//     tokenizer only — so a reserved string like "<|assistant|>" inside it stays ordinary text and can
+//     NEVER smuggle a real control token / forge a turn boundary in the stream.
+// ContentTrainable gates the loss mask on the content + its end-of-turn.
+export function AppendChatMessage(
+  Ids: number[],
+  LossMask: boolean[],
+  Message: ChatMessage,
+  Tok: SpecialTokenizer,
+  ContentTrainable: boolean,
+): void {
+  Ids.push(Tok.Id(RoleToken[Message.Role]));
+  LossMask.push(false); // role marker is never trained
+  const ContentIds = Message.Role === "Assistant" ? Tok.Encode(Message.Content) : Tok.EncodeBase(Message.Content);
+  for (const Id of ContentIds) {
+    Ids.push(Id);
+    LossMask.push(ContentTrainable);
+  }
+  Ids.push(Tok.Id(ChatTokens.EndOfTurn)); // teach the model to stop after replying
+  LossMask.push(ContentTrainable);
+}
+
 /** Token ids + per-token loss mask (true only on assistant content + its end-of-turn). */
 export function RenderForTraining(Messages: ChatMessage[], Tok: SpecialTokenizer): TrainingSequence {
   const Ids: number[] = [];
   const LossMask: boolean[] = [];
-  const Push = (SubIds: number[], Trainable: boolean): void => {
-    for (const Id of SubIds) {
-      Ids.push(Id);
-      LossMask.push(Trainable);
-    }
-  };
   for (const Message of Messages) {
-    const Trainable = Message.Role === "Assistant";
-    Push([Tok.Id(RoleToken[Message.Role])], false); // role marker is never trained
-    Push(Tok.Encode(Message.Content), Trainable);
-    Push([Tok.Id(ChatTokens.EndOfTurn)], Trainable); // teach the model to stop after replying
+    AppendChatMessage(Ids, LossMask, Message, Tok, Message.Role === "Assistant");
   }
   return { Ids, LossMask };
+}
+
+/** Render a conversation directly to token ids (the SAFE serving path). Uses the same per-message core
+ *  as training, so serving and training tokenize identically. AddAssistantCue appends the assistant
+ *  marker id to prompt the next reply. Bypasses the string round-trip that let content smuggle
+ *  control tokens (via SpecialTokenizer.Encode re-scanning the whole rendered string). */
+export function RenderChatToIds(Messages: ChatMessage[], Tok: SpecialTokenizer, AddAssistantCue = true): number[] {
+  const Ids: number[] = [];
+  const LossMask: boolean[] = [];
+  for (const Message of Messages) AppendChatMessage(Ids, LossMask, Message, Tok, false);
+  if (AddAssistantCue) Ids.push(Tok.Id(ChatTokens.Assistant));
+  return Ids;
 }

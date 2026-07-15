@@ -7,9 +7,21 @@
 import { RunCode } from "../Eval/CodeExecutor.ts";
 import type { EvalProblem } from "../Eval/EvalHarness.ts";
 
-/** Keep the candidates whose (candidate + tests) run passes — the SFT training set for this round. */
+/** Keep the DISTINCT candidates whose (candidate + tests) run passes — the SFT training set for this
+ *  round. Deduping matters: without it, a sampler that emits the same passing string many times would
+ *  over-weight that one solution in the next SFT round (and, across STaR rounds, collapse diversity). */
 export function CollectPassing(Problem: EvalProblem, Candidates: string[], TimeoutMs = 5000): string[] {
-  return Candidates.filter((Candidate) => RunCode(`${Candidate}\n${Problem.Tests}`, TimeoutMs).Passed);
+  const Seen = new Set<string>();
+  const Passing: string[] = [];
+  for (const Candidate of Candidates) {
+    const Key = Candidate.trim();
+    if (Seen.has(Key)) continue;
+    if (RunCode(`${Candidate}\n${Problem.Tests}`, TimeoutMs).Passed) {
+      Seen.add(Key);
+      Passing.push(Candidate);
+    }
+  }
+  return Passing;
 }
 
 export type RejectionRound = { Problem: string; Sampled: number; Kept: number; Passing: string[] };

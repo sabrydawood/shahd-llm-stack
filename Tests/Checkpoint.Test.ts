@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { rmSync } from "node:fs";
+import { rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { LoadConfig } from "../Brain/Config/LoadConfig.ts";
 import { CreateRngStreams } from "../Brain/Random/SeededRng.ts";
 import { Shahd } from "../Brain/Nn/Shahd.ts";
@@ -59,4 +59,22 @@ test("ApplyCheckpoint hard-fails on architecture mismatch", () => {
   const B = Build({ Model: { EmbedDim: 16, NumLayers: 1, NumHeads: 2, BlockSize: 8, VocabSize: 10, MlpRatio: 2 } });
   expect(() => ApplyCheckpoint(Ckpt, B.Model, B.Opt, B.Rng)).toThrow(/mismatch/);
   rmSync(CkptPath, { force: true });
+});
+
+test("checkpoint write is atomic (rotates a .bak) and load rejects a corrupted payload", () => {
+  const A = Build(BaseOverride);
+  SaveCheckpoint(CkptPath, A.Model, A.Opt, A.Rng); // first save: no prior file, no .bak yet
+  expect(existsSync(`${CkptPath}.tmp.${process.pid}`)).toBe(false); // temp cleaned up by the rename
+  SaveCheckpoint(CkptPath, A.Model, A.Opt, A.Rng); // second save rotates the prior good copy to .bak
+  expect(existsSync(`${CkptPath}.bak`)).toBe(true);
+
+  // Corrupt one base64 weight byte in place — same length, so only the checksum catches it.
+  const Raw = JSON.parse(readFileSync(CkptPath, "utf8")) as { Params: { Data: string }[] };
+  const D = Raw.Params[0].Data;
+  Raw.Params[0].Data = (D[0] === "A" ? "B" : "A") + D.slice(1);
+  writeFileSync(CkptPath, JSON.stringify(Raw));
+  expect(() => LoadCheckpoint(CkptPath)).toThrow(/checksum mismatch/);
+
+  rmSync(CkptPath, { force: true });
+  rmSync(`${CkptPath}.bak`, { force: true });
 });

@@ -45,6 +45,10 @@ export function ProbsFromLogits(Logits: Float64Array, Offset: number, VocabSize:
   }
   for (let J = 0; J < VocabSize; J++) Probs[J] /= Sum;
 
+  // Fast path (the common default TopK=0, TopP=1): no truncation, so the full softmax is the answer —
+  // skip the O(V log V) sort + renormalization entirely (Probs already sums to 1). Bit-identical.
+  if (Options.TopK <= 0 && Options.TopP >= 1) return Probs;
+
   let Indices: number[] = [];
   for (let J = 0; J < VocabSize; J++) Indices.push(J);
   Indices.sort((A, B) => Probs[B] - Probs[A]);

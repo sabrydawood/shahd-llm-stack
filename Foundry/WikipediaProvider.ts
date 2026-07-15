@@ -37,6 +37,13 @@ export function CreateWikipediaProvider(Options: WikipediaOptions = {}): WebProv
     Name: "wikipedia",
     Fetch: async (Query: string, Limit: number): Promise<SourceInput[]> => {
       const Lang = (Query || "en").trim().toLowerCase();
+      // Validate the language code STRICTLY (a real one is just letters, optionally hyphenated, e.g.
+      // "en", "pt-br"). Without this, a value like "127.0.0.1:6379/x" makes the request host become
+      // attacker-controlled — a server-side request forgery (SSRF) — since a URL's authority ends at
+      // the first "/". An allow-list of the expected shape closes it without touching legitimate use.
+      if (!/^[a-z]{2,10}(-[a-z]{2,10})?$/.test(Lang)) {
+        throw new Error(`Wikipedia: invalid language code "${Lang}" (expected e.g. "en", "ar", "pt-br")`);
+      }
       const Api = `https://${Lang}.wikipedia.org/w/api.php?action=query&generator=random&grnnamespace=0&grnlimit=10&prop=extracts&explaintext=1&exlimit=max&format=json&origin=*`;
       const Docs: SourceInput[] = [];
       let Batch: SourceInput[] = [];

@@ -8,5 +8,7 @@ export { SpeculativeSample } from "./SpeculativeSampling.ts";
 export type { SpeculativeSampleResult } from "./SpeculativeSampling.ts";
 export { MajorityVote, SelfConsistency } from "./SelfConsistency.ts";
 export type { VoteResult } from "./SelfConsistency.ts";
+export { ExtractAnswer, NormalizeAnswer, AnswerKey, AnswerTags, WrapThinkingAnswer, DefaultThinkingSystemPrompt } from "./AnswerExtraction.ts";
 export { TreeOfThoughtsSearch } from "./TreeOfThoughts.ts";
 export type { Thought, ExpandFn, ScoreFn, TreeOptions } from "./TreeOfThoughts.ts";
+export { SequenceLogProb, BestOfNByLogProb } from "./SequenceScore.ts";

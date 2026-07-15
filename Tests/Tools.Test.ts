@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -81,6 +81,13 @@ test("regex tool rejects catastrophic-backtracking patterns", () => {
   expect(String((Result as { error: string }).error)).toContain("backtracking");
 });
 
+test("regex tool runs quantifier-bearing patterns through the isolated (timeout-fenced) sandbox", () => {
+  // \d+ has a quantifier, so it takes the fenced subprocess path — a pattern that ReDoS-hangs there is
+  // KILLED by the sandbox timeout instead of freezing the server (the heuristic screen is incomplete;
+  // the fence is the real bound). Correct results still come back from the fenced path.
+  expect(RegexTool.Execute({ pattern: "\\d+", text: "a12 b34", action: "match" })).toEqual({ matches: ["12", "34"], count: 2 });
+}, 12000);
+
 test("async knowledge tools: web_search stubs offline, memory round-trips", async () => {
   const Registry = DefaultToolRegistry();
   const Context = DefaultToolContext();
@@ -143,6 +150,30 @@ test("Config.Tools actually governs behavior end-to-end (root, byte cap, exec, b
     expect(String(Capped["error"])).toContain("cap");
   } finally {
     rmSync(Root, { recursive: true, force: true });
+  }
+});
+
+test("Workspace refuses a symlink that escapes the root (CWE-59)", () => {
+  const Root = mkdtempSync(join(tmpdir(), "shahd-ws-"));
+  const Outside = mkdtempSync(join(tmpdir(), "shahd-out-"));
+  try {
+    writeFileSync(join(Outside, "secret.txt"), "TOP SECRET");
+    mkdirSync(join(Root, "sub"));
+    const Ws = new Workspace(Root);
+    expect(() => Ws.Resolve("sub")).not.toThrow(); // a legit in-root path is fine
+    let Linked = false;
+    try {
+      symlinkSync(Outside, join(Root, "link"), "junction"); // dir junction: no admin needed on Windows
+      Linked = true;
+    } catch {
+      // symlink creation not permitted in this environment — skip the escape assertion, keep the rest
+    }
+    if (Linked) {
+      expect(() => Ws.Resolve("link/secret.txt")).toThrow(/symlink/); // followed link would escape -> rejected
+    }
+  } finally {
+    rmSync(Root, { recursive: true, force: true });
+    rmSync(Outside, { recursive: true, force: true });
   }
 });
 

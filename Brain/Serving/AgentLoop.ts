@@ -10,8 +10,14 @@ import type { ToolRegistry } from "./Tools/ToolRegistry.ts";
 import type { ToolContext } from "./Tools/ToolTypes.ts";
 import type { ToolCall } from "./ToolProtocol.ts";
 import { ParseToolCall, FormatToolResult } from "./ToolProtocol.ts";
+import { StripThinking } from "../Reasoning/ThinkingMode.ts";
 
-export type Generator = (Prompt: string) => string | Promise<string>;
+// The generator is handed the live ChatSession (not a pre-rendered string) so it renders the prompt
+// however its tokenizer requires: a special-token (chat) model MUST render to ids via
+// Session.RenderPromptIds (base-encoding untrusted content so it can't smuggle control tokens); tests
+// can inspect Session.RenderPrompt()/Messages directly. This keeps the encode step where the tokenizer
+// lives, and closes the control-token smuggling that a re-encoded rendered string allowed.
+export type Generator = (Session: ChatSession) => string | Promise<string>;
 
 // One observable step of the agent's reasoning — what it generated, whether that was a tool call,
 // the tool's result, and whether the step ended the loop. This is the raw material of a thinking
@@ -41,13 +47,16 @@ export async function RunAgent(
 ): Promise<AgentResult> {
   const ToolCalls: ToolCall[] = [];
   for (let Step = 0; Step < MaxSteps; Step++) {
-    const Generated = await Generate(Session.RenderPrompt());
+    const Generated = await Generate(Session);
     const Call = ParseToolCall(Generated);
     if (Call === null) {
-      // Plain text is the canonical final answer.
-      Session.AddAssistant(Generated);
+      // Plain text is the canonical final answer. Strip the private <|think|> scratchpad before it
+      // reaches the user or the conversation history — the raw text stays in the trace step (below) so
+      // the reasoning is still observable, but it must never leak into the visible reply or context.
+      const Answer = StripThinking(Generated);
+      Session.AddAssistant(Answer);
       OnStep?.({ Index: Step, Generated, Call: null, Result: null, Terminal: true });
-      return { FinalText: Generated, Steps: Step + 1, ToolCalls, HitStepLimit: false };
+      return { FinalText: Answer, Steps: Step + 1, ToolCalls, HitStepLimit: false };
     }
     ToolCalls.push(Call);
     Session.AddAssistant(Generated); // record the tool-call turn
@@ -58,7 +67,7 @@ export async function RunAgent(
     const Terminal = Tool?.Terminal === true && !("error" in Result);
     OnStep?.({ Index: Step, Generated, Call, Result, Terminal });
     if (Terminal) {
-      const Answer = typeof Result["answer"] === "string" ? Result["answer"] : Generated;
+      const Answer = typeof Result["answer"] === "string" ? Result["answer"] : StripThinking(Generated);
       return { FinalText: Answer, Steps: Step + 1, ToolCalls, HitStepLimit: false };
     }
   }

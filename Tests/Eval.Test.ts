@@ -3,6 +3,7 @@ import { PassAtK } from "../Brain/Eval/PassAtK.ts";
 import { RunCode } from "../Brain/Eval/CodeExecutor.ts";
 import { EvaluateProblem } from "../Brain/Eval/EvalHarness.ts";
 import { CollectPassing } from "../Brain/Rl/RejectionSampling.ts";
+import { CodingProblems } from "../Brain/Eval/ProblemSet.ts";
 
 test("PassAtK matches known values", () => {
   expect(PassAtK(5, 0, 1)).toBe(0);
@@ -26,4 +27,11 @@ test("EvaluateProblem and CollectPassing count correct candidates", () => {
   expect(Result.Correct).toBe(2);
   expect(Result.PassAt1).toBeCloseTo(PassAtK(3, 2, 1), 10);
   expect(CollectPassing(Problem, [Good, Bad]).length).toBe(1);
+  expect(CollectPassing(Problem, [Good, Good, Good]).length).toBe(1); // distinct passers only (dedup)
 }, 20000);
+
+test("every ProblemSet reference solution passes its own tests (genuine executable ground truth)", () => {
+  for (const P of CodingProblems) {
+    expect(RunCode(`${P.Reference}\n${P.Tests}`).Passed).toBe(true);
+  }
+}, 60000);

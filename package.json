@@ -13,6 +13,7 @@
     "train": "bun run Scripts/Train.ts",
     "sample": "bun run Scripts/Sample.ts",
     "train:bpe": "bun run Scripts/TrainBpeMerges.ts",
+    "star": "bun run Scripts/StarRound.ts",
     "foundry": "bun run Scripts/RunFoundry.ts",
     "foundry:dashboard": "bun run --watch Scripts/StartDashboard.ts",
     "foundry:migrate": "bun run Scripts/FoundryMigrate.ts",

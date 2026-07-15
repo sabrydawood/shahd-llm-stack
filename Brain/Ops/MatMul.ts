@@ -46,13 +46,21 @@ export function MatMul(A: Tensor, B: Tensor): Tensor {
     const BackwardBackend = Backend;
     Out.BackwardFn = () => {
       if (BackwardBackend === null) {
+        // I,P,J order: the inner J loop reads B.Data / writes B.Grad with stride 1 (cache-friendly,
+        // matching the forward's ikj order) instead of the old I,J,P which strode B by N — a large
+        // constant-factor win on the hottest matmul (the LM head, where N = VocabSize). Bit-identical
+        // to the old order: A.Grad[I,P] still accumulates over J ascending, and each B.Grad[P,J] is
+        // still touched once per (ascending) I, so the floating-point accumulation order is unchanged.
         for (let I = 0; I < M; I++) {
-          for (let J = 0; J < N; J++) {
-            const G = Out.Grad[I * N + J];
-            if (G === 0) continue;
-            for (let P = 0; P < K; P++) {
-              A.Grad[I * K + P] += G * B.Data[P * N + J];
-              B.Grad[P * N + J] += G * A.Data[I * K + P];
+          for (let P = 0; P < K; P++) {
+            const AVal = A.Data[I * K + P];
+            const IdxA = I * K + P;
+            const RowB = P * N;
+            for (let J = 0; J < N; J++) {
+              const G = Out.Grad[I * N + J];
+              if (G === 0) continue;
+              A.Grad[IdxA] += G * B.Data[RowB + J];
+              B.Grad[RowB + J] += G * AVal;
             }
           }
         }

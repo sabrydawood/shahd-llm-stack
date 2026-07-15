@@ -11,7 +11,10 @@ import { LoadConfig } from "../Brain/Config/LoadConfig.ts";
 import { CreateRngStreams } from "../Brain/Random/SeededRng.ts";
 import { TrainBpe } from "../Brain/Tokenizer/BpeMergeTrainer.ts";
 import { BytePairEncoder } from "../Brain/Tokenizer/BytePairEncoder.ts";
-import { TrainValSplit } from "../Brain/Data/TrainValSplit.ts";
+import { SpecialTokenizer } from "../Brain/Tokenizer/SpecialTokenizer.ts";
+import { SpecialTokens } from "../Brain/Tokenizer/SpecialTokens.ts";
+import { SplitAndEncodeDocuments } from "../Brain/Data/TrainValSplit.ts";
+import { DedupedIndices } from "../Brain/Data/NearDedup.ts";
 import { InMemoryDataLoader } from "../Brain/Data/DataLoader.ts";
 import { Shahd } from "../Brain/Nn/Shahd.ts";
 import { CreateOptimizer } from "../Brain/Optim/OptimBarrel.ts";
@@ -62,8 +65,20 @@ async function AddKind(Which: "code" | "knowledge", BudgetMb: number): Promise<v
 await AddKind("code", CodeMb);
 await AddKind("knowledge", KnowledgeMb);
 await Stores.Close();
-const CorpusText = Parts.join("\n\n");
-console.log(`corpus: ${Parts.length} docs total, ${(CorpusText.length / 1e6).toFixed(2)}MB`);
+console.log(`corpus: ${Parts.length} docs total, ${(Parts.join("\n\n").length / 1e6).toFixed(2)}MB`);
+// Near-duplicate removal (MinHash): the Foundry Filtered tier dedups only EXACT bytes, so near-dups
+// (reformatted / renamed copies) survive and would otherwise (a) leak across the train/val split and
+// (b) over-weight repeated code. Apply it here, right before training. O(n^2) — fine at current scale;
+// an LSH-banded variant is the scale path.
+const KeepIdx = new Set(DedupedIndices(Parts, 0.8));
+const Docs = Parts.filter((_P, I) => KeepIdx.has(I));
+console.log(`near-dedup: ${Parts.length} -> ${Docs.length} docs`);
+// Guard: an empty/misconfigured Filtered tier would otherwise train on nothing (a degenerate vocab
+// still passes Zod) and silently produce a meaningless model.
+if (Docs.length < 2) {
+  throw new Error(`TrainOnFoundry: need >= 2 Filtered documents after near-dedup (got ${Docs.length}) — collect/curate more data first`);
+}
+const CorpusText = Docs.join("\n\n");
 
 const EffectiveSteps = Measure ? 8 : Steps;
 const CkptName = ReadArg("--Name=", "foundry");
@@ -84,19 +99,24 @@ if (CkptStore !== null && !Measure && !Fresh) {
   const State = (Existing?.TokenizerState ?? null) as BpeTokenizerState | null;
   if (Existing !== null && State !== null && State.Kind === "Bpe" && Array.isArray(State.Merges)) {
     const M = Existing.Config.Model;
-    const ArchMatch = M.EmbedDim === EmbedDim && M.NumLayers === NumLayers && M.NumHeads === NumHeads && M.BlockSize === BlockSize;
+    // VocabSize must also match: an EOS special adds 1 above the BPE vocab (256 + merges). A pre-EOS
+    // checkpoint (no +1) is a different architecture — reject it here so we start fresh instead of
+    // crashing later in ApplyCheckpoint's VocabSize shape check.
+    const ArchMatch = M.EmbedDim === EmbedDim && M.NumLayers === NumLayers && M.NumHeads === NumHeads && M.BlockSize === BlockSize && M.VocabSize === 256 + State.Merges.length + 1;
     const Match = ArchMatch && (ResumeFlag || Existing.Config.Schedule.MaxSteps === EffectiveSteps);
     const DoneStep = Number((Existing.Meta as Record<string, unknown>)["Step"] ?? 0);
     if (Match && DoneStep < EffectiveSteps) Resume = { Ckpt: Existing, Step: DoneStep, Merges: State.Merges };
   }
 }
 
-// Tokenizer: reuse the checkpoint's merges when resuming, else train fresh BPE on the corpus.
+// Tokenizer: reuse the checkpoint's merges when resuming, else train fresh BPE on the corpus. Wrapped
+// with an EOS special so document boundaries are a hard token in the training stream.
 const T0 = Date.now();
 const Bpe = Resume !== null ? { Merges: Resume.Merges } : TrainBpe(CorpusText, NumMerges);
-const Tokenizer = new BytePairEncoder(Bpe);
-const Encoded = Tokenizer.Encode(CorpusText);
-console.log(`bpe: ${Bpe.Merges.length} merges -> vocab ${Tokenizer.VocabSize}; ${Encoded.length} tokens${Resume !== null ? " (reused from checkpoint)" : `; trained in ${((Date.now() - T0) / 1000).toFixed(1)}s`}`);
+const BaseTok = new BytePairEncoder(Bpe);
+const Tokenizer = new SpecialTokenizer(BaseTok, [SpecialTokens.Eos]);
+const EosId = Tokenizer.Id(SpecialTokens.Eos);
+console.log(`bpe: ${Bpe.Merges.length} merges -> vocab ${Tokenizer.VocabSize}${Resume !== null ? " (reused from checkpoint)" : `; trained in ${((Date.now() - T0) / 1000).toFixed(1)}s`}`);
 
 const WarmupSteps = Math.max(1, Math.min(40, Math.floor(EffectiveSteps / 4)));
 const EvalInterval = Measure ? EffectiveSteps + 1 : Math.max(1, Math.min(100, EffectiveSteps));
@@ -113,7 +133,9 @@ const Config = LoadConfig({
 
 const ComputeChoice = ActivateFromConfig(Config);
 const Rng = CreateRngStreams(Config.Training.Seed);
-const { Train, Val } = TrainValSplit(Encoded, 0.1);
+// Document-level split (shuffled) with EOS between docs — no positional train/val leak.
+const { Train, Val } = SplitAndEncodeDocuments(Docs, 0.1, Rng.DataRng, (Text) => Tokenizer.Encode(Text), EosId);
+console.log(`split: ${Train.length} train + ${Val.length} val tokens (document-level, shuffled)`);
 const TrainLoader = new InMemoryDataLoader(Train, Config.Model.BlockSize, Rng.DataRng);
 const ValLoader = new InMemoryDataLoader(Val, Config.Model.BlockSize, Rng.DataRng);
 const Model = new Shahd(Config, Rng.InitRng);
@@ -145,7 +167,7 @@ if (Measure) {
 // and re-running resumes from the last saved checkpoint (nothing done is thrown away).
 const CheckEvery = Math.max(50, Math.floor(EffectiveSteps / 20)); // ~20 saves across the run
 function BuildAt(Step: number): Checkpoint {
-  return BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: EffectiveSteps, Step, Corpus: "foundry-filtered" }, { Kind: "Bpe", Merges: Bpe.Merges });
+  return BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: EffectiveSteps, Step, Corpus: "foundry-filtered" }, { Kind: "Bpe", Merges: Bpe.Merges, Specials: [SpecialTokens.Eos] });
 }
 for (let Start = StartStep; Start < EffectiveSteps; Start += CheckEvery) {
   const End = Math.min(Start + CheckEvery, EffectiveSteps);

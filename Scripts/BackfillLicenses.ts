@@ -30,33 +30,33 @@ const Store = new PostgresDocumentStore(Url);
 let PromoteRepos = 0;
 let PromoteDocs = 0;
 let KeepRepos = 0;
-for (const { source, n } of Sources) {
+for (const { source: Source, n: N } of Sources) {
   let Lic: Awaited<ReturnType<typeof FetchRepoLicense>> = null;
   try {
-    Lic = await FetchRepoLicense(source, Token);
+    Lic = await FetchRepoLicense(Source, Token);
   } catch (Caught) {
-    console.log(`KEEP  ${String(n).padStart(5)}  ${source}  (fetch error: ${(Caught as Error).message})`);
+    console.log(`KEEP  ${String(N).padStart(5)}  ${Source}  (fetch error: ${(Caught as Error).message})`);
     KeepRepos++;
     continue;
   }
   if (Lic === null) {
-    console.log(`KEEP  ${String(n).padStart(5)}  ${source}  (no LICENSE file)`);
+    console.log(`KEEP  ${String(N).padStart(5)}  ${Source}  (no LICENSE file)`);
     KeepRepos++;
     continue;
   }
   const Det = DetectSpdx(Lic.Text);
   if (!Det.Permissive || Det.Spdx === null) {
-    console.log(`KEEP  ${String(n).padStart(5)}  ${source}  (${Det.Note})`);
+    console.log(`KEEP  ${String(N).padStart(5)}  ${Source}  (${Det.Note})`);
     KeepRepos++;
     continue;
   }
   if (Apply) {
-    const { Promoted, KeptLowQuality } = await Store.ReclassifyBySource(source, Det.Spdx, MinQuality);
-    console.log(`PROMOTE ${String(Promoted).padStart(5)}  ${source}  -> ${Det.Spdx}  (kept ${KeptLowQuality} low-quality rejected)`);
+    const { Promoted, KeptLowQuality } = await Store.ReclassifyBySource(Source, Det.Spdx, MinQuality);
+    console.log(`PROMOTE ${String(Promoted).padStart(5)}  ${Source}  -> ${Det.Spdx}  (kept ${KeptLowQuality} low-quality rejected)`);
     PromoteDocs += Promoted;
   } else {
-    console.log(`PROMOTE ${String(n).padStart(5)}  ${source}  -> ${Det.Spdx}  (dry-run; before quality gate)`);
-    PromoteDocs += n;
+    console.log(`PROMOTE ${String(N).padStart(5)}  ${Source}  -> ${Det.Spdx}  (dry-run; before quality gate)`);
+    PromoteDocs += N;
   }
   PromoteRepos++;
 }

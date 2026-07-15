@@ -25,7 +25,11 @@ export function CrossEntropy(Logits: Tensor, Targets: number[]): Tensor {
       Sum += E;
     }
     for (let J = 0; J < V; J++) Probs[I * V + J] /= Sum;
-    Loss += -Math.log(Probs[I * V + Targets[I]] + 1e-12);
+    const Target = Targets[I];
+    if (Target < 0 || Target >= V || !Number.isInteger(Target)) {
+      throw new Error(`CrossEntropy: target ${Target} at position ${I} out of range [0,${V}) — likely a tokenizer/vocab mismatch`);
+    }
+    Loss += -Math.log(Probs[I * V + Target] + 1e-12);
   }
   Out.Data[0] = Loss / T;
 

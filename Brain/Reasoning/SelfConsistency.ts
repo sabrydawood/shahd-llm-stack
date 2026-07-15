@@ -32,13 +32,17 @@ export function MajorityVote<T>(Items: T[], KeyOf: (Item: T) => string): VoteRes
   return { Winner, Count: BestCount, Total: Items.length, Tally: [...Counts.entries()] };
 }
 
-/** Draw `Samples` generations, extract each answer, and majority-vote over them. */
+/** Draw `Samples` generations, extract each answer, and majority-vote over them. Votes are counted by
+ *  `KeyOf(answer)` (default: the raw answer) so a caller can pass a normalizer (e.g. NormalizeAnswer) to
+ *  make "42"/"42."/" 42" vote together; the returned Winner is the first-seen RAW answer for the winning
+ *  key, so the original formatting is preserved for display. */
 export function SelfConsistency(
   Sample: () => string,
   Samples: number,
   ExtractAnswer: (Text: string) => string,
+  KeyOf: (Answer: string) => string = (A) => A,
 ): VoteResult<string> {
   const Answers: string[] = [];
   for (let I = 0; I < Samples; I++) Answers.push(ExtractAnswer(Sample()));
-  return MajorityVote(Answers, (A) => A);
+  return MajorityVote(Answers, KeyOf);
 }

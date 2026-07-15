@@ -27,7 +27,11 @@ export function MaskedCrossEntropy(Logits: Tensor, Targets: number[], Mask: bool
     }
     for (let J = 0; J < V; J++) Probs[I * V + J] /= Sum;
     if (Mask[I]) {
-      Loss += -Math.log(Probs[I * V + Targets[I]] + 1e-12);
+      const Target = Targets[I];
+      if (Target < 0 || Target >= V || !Number.isInteger(Target)) {
+        throw new Error(`MaskedCrossEntropy: target ${Target} at position ${I} out of range [0,${V}) — likely a tokenizer/vocab mismatch`);
+      }
+      Loss += -Math.log(Probs[I * V + Target] + 1e-12);
       Count++;
     }
   }

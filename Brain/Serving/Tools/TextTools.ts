@@ -2,15 +2,44 @@
 // caps input length (safety: a user-supplied regex is untrusted and could otherwise ReDoS-hang the
 // server) — the same intent-oriented, ReDoS-safe discipline the content filter uses.
 
-import type { Tool } from "./ToolTypes.ts";
+import type { Tool, ToolResult } from "./ToolTypes.ts";
 import { Err, RequireString, OptionalString, OptionalBool } from "./ToolArgs.ts";
+import { RunCode } from "../../Eval/CodeExecutor.ts";
 
 const MaxRegexInput = 100_000;
+const RegexTimeoutMs = 2000; // hard cap for the isolated subprocess that runs quantifier-bearing patterns
 
-// Heuristic screen for the classic ReDoS shapes (nested quantifiers, quantified alternation of
-// overlapping atoms). Not exhaustive, but blocks the constructs that actually blow up.
+// Heuristic FAST-REJECT for the classic obvious ReDoS shapes — a clear early error, NOT the safety
+// boundary (it is provably incomplete, e.g. it misses (a|aa)+). The real safety comes from running any
+// quantifier-bearing pattern in an isolated, timeout-killed subprocess (RunFencedRegex) below.
 function LooksLikeReDoS(Pattern: string): boolean {
   return /(\([^)]*[+*][^)]*\)[+*])|(\(\.\*\)[+*])|(\[[^\]]*\][+*])[+*]/.test(Pattern);
+}
+
+// Only a pattern with an unbounded/large quantifier (+ * {) can catastrophically backtrack; those are
+// executed in a killable subprocess so a crafted pattern is terminated at the timeout instead of
+// freezing the single-threaded server forever. Patterns without one can't ReDoS and run in-process.
+function HasQuantifier(Pattern: string): boolean {
+  return /[+*{]/.test(Pattern);
+}
+
+// Run the regex in an isolated subprocess with a hard timeout (reusing the sandboxed executor). A
+// catastrophic pattern is KILLED at RegexTimeoutMs; the worst case is a bounded stall, never a hang.
+function RunFencedRegex(Pattern: string, Flags: string, Text: string, Action: string, Replacement: string): ToolResult {
+  const Script =
+    `const Re = new RegExp(${JSON.stringify(Pattern)}, ${JSON.stringify(Flags)});\n` +
+    `const Text = ${JSON.stringify(Text)};\n` +
+    `let Out;\n` +
+    `if (${JSON.stringify(Action)} === "replace") { Out = { text: Text.replace(Re, ${JSON.stringify(Replacement)}) }; }\n` +
+    `else { const G = Re.global ? Re : new RegExp(${JSON.stringify(Pattern)}, ${JSON.stringify(Flags)} + "g"); const M = [...Text.matchAll(G)].map((x) => x[0]); Out = { matches: M, count: M.length }; }\n` +
+    `console.log(JSON.stringify(Out));`;
+  const Result = RunCode(Script, RegexTimeoutMs);
+  if (!Result.Passed) return Err("pattern rejected: possible catastrophic backtracking (timed out or failed in the sandbox)");
+  try {
+    return JSON.parse(Result.Stdout.trim()) as ToolResult;
+  } catch {
+    return Err("regex sandbox produced no parseable result");
+  }
 }
 
 // Parse or stringify JSON. Args: { action: 'parse'|'stringify', input: string, pretty?: boolean }.
@@ -46,21 +75,21 @@ export const RegexTool: Tool = {
     if (Text.length > MaxRegexInput) return Err(`text exceeds ${MaxRegexInput} chars`);
     if (LooksLikeReDoS(Pattern)) return Err("pattern rejected: possible catastrophic backtracking");
     const Flags = OptionalString(Arguments, "flags", "");
-    let Re: RegExp;
+    const Action = OptionalString(Arguments, "action", "match");
+    if (Action !== "match" && Action !== "replace") return Err(`unknown action: ${Action}`);
+    const Replacement = OptionalString(Arguments, "replacement", "");
+    // Validate the pattern compiles (fast, clear error) before any execution.
     try {
-      Re = new RegExp(Pattern, Flags);
+      new RegExp(Pattern, Flags);
     } catch (Error_) {
       return Err(`invalid regex: ${(Error_ as Error).message}`);
     }
-    const Action = OptionalString(Arguments, "action", "match");
-    if (Action === "replace") {
-      return { text: Text.replace(Re, OptionalString(Arguments, "replacement", "")) };
-    }
-    if (Action === "match") {
-      const Matches = [...Text.matchAll(Re.global ? Re : new RegExp(Pattern, Flags + "g"))].map((M) => M[0]);
-      return { matches: Matches, count: Matches.length };
-    }
-    return Err(`unknown action: ${Action}`);
+    // Quantifier-bearing patterns run fenced (subprocess + hard timeout); the rest run in-process.
+    if (HasQuantifier(Pattern)) return RunFencedRegex(Pattern, Flags, Text, Action, Replacement);
+    const Re = new RegExp(Pattern, Flags);
+    if (Action === "replace") return { text: Text.replace(Re, Replacement) };
+    const Matches = [...Text.matchAll(Re.global ? Re : new RegExp(Pattern, Flags + "g"))].map((M) => M[0]);
+    return { matches: Matches, count: Matches.length };
   },
 };
 

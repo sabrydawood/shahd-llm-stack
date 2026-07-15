@@ -21,11 +21,13 @@ import type { RunnableModel } from "../Brain/Checkpoint/LoadRunnableModel.ts";
 import { GuardedGenerateStream } from "../Brain/Safety/GuardedGenerate.ts";
 import { RenderMessages } from "../Brain/Serving/RenderChat.ts";
 import { ChatSession } from "../Brain/Serving/ChatSession.ts";
+import { SpecialTokenizer } from "../Brain/Tokenizer/SpecialTokenizer.ts";
 import { RunAgent } from "../Brain/Serving/AgentLoop.ts";
 import type { AgentStep } from "../Brain/Serving/AgentLoop.ts";
 import { FormatTrace, BuildTrace } from "../Brain/Serving/ReasoningTrace.ts";
 import { BuildAgentTooling, RenderToolManifest } from "../Brain/Serving/Tools/ToolsBarrel.ts";
 import { ChatTokens } from "../Brain/Sft/ChatTemplate.ts";
+import { DefaultThinkingSystemPrompt, ExtractAnswer, NormalizeAnswer, MajorityVote } from "../Brain/Reasoning/ReasoningBarrel.ts";
 import { Generate } from "../Brain/Sampling/Generate.ts";
 import { DefaultSampling } from "../Brain/Sampling/Sampler.ts";
 import { SeededRng } from "../Brain/Random/SeededRng.ts";
@@ -34,6 +36,9 @@ import { ReadArg } from "./ScriptArgs.ts";
 import { existsSync } from "node:fs";
 
 const DbUrl = process.env["DATABASE_URL"];
+// ONE shared checkpoint-store pool for the whole dashboard lifetime — reused by reload/list/delete
+// instead of opening (and, on error paths, LEAKING) a fresh postgres pool on every call.
+const SharedCkptStore = DbUrl !== undefined && DbUrl !== "" ? new PostgresCheckpointStore(DbUrl) : null;
 // Per-kind stores (Postgres): collection routes each source to its own kind table, so data types stay
 // separated. Without a database, fall back to one in-memory store (no kind separation).
 const Stores = DbUrl !== undefined && DbUrl !== "" ? ResolveFoundryStores() : null;
@@ -50,11 +55,9 @@ const ModelHolder: ModelState = { Runnable: null, Info: null, Source: "none", Na
 // fallback for the default name only.
 async function ReloadModel(Name: string = ModelHolder.Name): Promise<void> {
   ModelHolder.Name = Name;
-  if (DbUrl !== undefined && DbUrl !== "") {
+  if (SharedCkptStore !== null) {
     try {
-      const CkptStore = new PostgresCheckpointStore(DbUrl);
-      const Ckpt = await CkptStore.Load(Name);
-      await CkptStore.Close();
+      const Ckpt = await SharedCkptStore.Load(Name);
       if (Ckpt !== null) {
         ModelHolder.Runnable = LoadRunnableModelFrom(Ckpt);
         ModelHolder.Info = DescribeModel(ModelHolder.Runnable.Model);
@@ -79,12 +82,9 @@ async function ReloadModel(Name: string = ModelHolder.Name): Promise<void> {
 
 // List saved checkpoints (the chat-model picker).
 async function ListCheckpoints(): Promise<CheckpointSummary[]> {
-  if (DbUrl === undefined || DbUrl === "") return [];
+  if (SharedCkptStore === null) return [];
   try {
-    const CkptStore = new PostgresCheckpointStore(DbUrl);
-    const List = await CkptStore.List();
-    await CkptStore.Close();
-    return List;
+    return await SharedCkptStore.List();
   } catch {
     return [];
   }
@@ -93,6 +93,10 @@ async function ListCheckpoints(): Promise<CheckpointSummary[]> {
 // Chat generation reads the CURRENT model from the holder, so a post-training reload takes effect
 // immediately. Logs each inference to the console so testing the model in the dashboard is observable.
 let Counter = 0;
+// Self-consistency: with N>1 the chat model answers a turn N times (different sampling seeds) and the
+// majority-voted answer wins — test-time compute that lifts reasoning accuracy with NO extra data or
+// training. Off by default (N=1); set SHAHD_SELF_CONSISTENCY=5 to enable. Needs Temperature>0 to diverge.
+const SelfConsistencySamples = Math.max(1, Math.floor(Number(process.env["SHAHD_SELF_CONSISTENCY"] ?? "1")) || 1);
 
 // Chat-format (SFT) models serve through the AGENT LOOP: the model can emit tool calls and thinking,
 // tools run against the config-gated registry, and the reasoning trace (thinking -> tool+result ->
@@ -101,30 +105,55 @@ let Counter = 0;
 async function ServeChatAgent(Loaded: RunnableModel, Messages: ChatMessage[], Opts: ChatOpts, OnDelta: (Delta: string) => void): Promise<string> {
   const { Model, Tokenizer, Config } = Loaded;
   const Tooling = BuildAgentTooling(Config);
-  const Session = new ChatSession("You are Shahd.\n\n" + RenderToolManifest(Tooling.Registry.List()));
-  for (const M of Messages) {
-    if (M.Role === "assistant") Session.AddAssistant(M.Content);
-    else Session.AddUser(M.Content);
-  }
-  Tooling.Context.Session = Session;
-  const Rng = new SeededRng(Config.Training.Seed + Counter++);
-  // One agent turn = the model continues the chat prompt up to <|endofturn|>, decoded to text.
-  const Gen = (Prompt: string): string => {
-    const Ids = Tokenizer.Encode(Prompt);
-    const Out = Generate(Model, Ids, Opts.MaxTokens, { ...DefaultSampling, Temperature: Opts.Temperature }, Rng);
-    const Text = Tokenizer.Decode(Out.slice(Ids.length));
-    const End = Text.indexOf(ChatTokens.EndOfTurn);
-    return End >= 0 ? Text.slice(0, End) : Text;
+  // The canonical thinking system prompt (single source of truth shared with SFT) + the tool manifest,
+  // so the model is asked at serving to do exactly what it was trained to do: think, then answer.
+  const SystemPrompt = DefaultThinkingSystemPrompt + "\n\n" + RenderToolManifest(Tooling.Registry.List());
+
+  // One full agent run over a FRESH session (so N self-consistency runs don't contaminate each other).
+  const RunOnce = async (): Promise<{ Text: string; Steps: AgentStep[] }> => {
+    const Session = new ChatSession(SystemPrompt);
+    for (const M of Messages) {
+      if (M.Role === "assistant") Session.AddAssistant(M.Content);
+      else Session.AddUser(M.Content);
+    }
+    Tooling.Context.Session = Session;
+    const Rng = new SeededRng(Config.Training.Seed + Counter++); // distinct seed per run => diverse samples
+    // One agent turn = the model continues the chat prompt up to <|endofturn|>, decoded to text.
+    // A chat model uses a SpecialTokenizer: render the prompt directly to ids (untrusted content
+    // base-encoded) so a user/tool string can't smuggle a real control token. Only fall back to
+    // string-encode for the unexpected non-special tokenizer case.
+    const Gen = (Session2: ChatSession): string => {
+      const Ids = Tokenizer instanceof SpecialTokenizer ? Session2.RenderPromptIds(Tokenizer) : Tokenizer.Encode(Session2.RenderPrompt());
+      const Out = Generate(Model, Ids, Opts.MaxTokens, { ...DefaultSampling, Temperature: Opts.Temperature }, Rng);
+      const Text = Tokenizer.Decode(Out.slice(Ids.length));
+      const End = Text.indexOf(ChatTokens.EndOfTurn);
+      return End >= 0 ? Text.slice(0, End) : Text;
+    };
+    const Steps: AgentStep[] = [];
+    const Result = await RunAgent(Session, Gen, Tooling.Registry, Tooling.MaxSteps, Tooling.Context, (Step) => {
+      Steps.push(Step);
+    });
+    return { Text: Result.FinalText, Steps };
   };
-  const Steps: AgentStep[] = [];
-  const Result = await RunAgent(Session, Gen, Tooling.Registry, Tooling.MaxSteps, Tooling.Context, (Step) => {
-    Steps.push(Step);
-    console.log(`[chat] step ${Step.Index}${Step.Call ? ` tool=${Step.Call.Name}` : ""}${Step.Terminal ? " (final)" : ""}`);
-  });
-  console.log(`[chat] reasoning trace:\n${FormatTrace(Steps)}`);
-  Opts.OnTrace?.(BuildTrace(Steps)); // surface the same trace to the dashboard UI (the visible reasoning lens)
-  OnDelta(Result.FinalText);
-  return Result.FinalText;
+
+  let Best: { Text: string; Steps: AgentStep[] };
+  if (SelfConsistencySamples <= 1) {
+    Best = await RunOnce();
+  } else {
+    // Draw N runs, then majority-vote over their NORMALIZED final answers (so "42"/"42." count together);
+    // the winning run's own text + trace is what we surface.
+    const Runs: { Text: string; Steps: AgentStep[] }[] = [];
+    for (let I = 0; I < SelfConsistencySamples; I++) Runs.push(await RunOnce());
+    const Vote = MajorityVote(Runs.map((R) => ExtractAnswer(R.Text)), NormalizeAnswer);
+    const WinnerKey = NormalizeAnswer(Vote.Winner);
+    Best = Runs.find((R) => NormalizeAnswer(ExtractAnswer(R.Text)) === WinnerKey) ?? Runs[0]!;
+    console.log(`[chat] self-consistency: ${SelfConsistencySamples} runs, winner "${Vote.Winner}" (${Vote.Count}/${Vote.Total}); tally ${JSON.stringify(Vote.Tally)}`);
+  }
+
+  console.log(`[chat] reasoning trace:\n${FormatTrace(Best.Steps)}`);
+  Opts.OnTrace?.(BuildTrace(Best.Steps)); // surface the trace to the dashboard UI (the visible reasoning lens)
+  OnDelta(Best.Text);
+  return Best.Text;
 }
 
 const Stream: ChatStreamFn = async (Messages, Opts, OnDelta) => {
@@ -313,10 +342,12 @@ StartDashboard(InspectStore, Port, Learn, {
   DeleteDoc: (Kind, Id) => KindStore(Kind).DeleteById(Id),
   DeleteMatching: (Kind, Filter) => KindStore(Kind).DeleteMatching(Filter),
   DeleteCheckpoint: async (Name: string): Promise<void> => {
-    if (DbUrl === undefined || DbUrl === "") return;
-    const CkptStore = new PostgresCheckpointStore(DbUrl);
-    await CkptStore.Delete(Name);
-    await CkptStore.Close();
+    if (SharedCkptStore === null) return;
+    try {
+      await SharedCkptStore.Delete(Name);
+    } catch (Caught) {
+      console.warn(`[dashboard] delete checkpoint "${Name}" failed: ${(Caught as Error).message}`);
+    }
   },
 });
 console.log(`Foundry control panel: http://localhost:${Port}  (store=${Stores !== null ? "postgres/per-kind" : "memory"}, ${await InspectStore.Count()} code docs, GitHub token: ${GitHubToken() ? "yes" : "no"})`);

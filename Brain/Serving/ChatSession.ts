@@ -2,7 +2,9 @@
 // the chat template. Tool results are appended as user-visible turns so the model can read them.
 
 import type { ChatMessage } from "../Sft/ChatTemplate.ts";
-import { RenderChat } from "../Sft/ChatTemplate.ts";
+import { RenderChat, RenderChatToIds } from "../Sft/ChatTemplate.ts";
+import type { SpecialTokenizer } from "../Tokenizer/SpecialTokenizer.ts";
+import { ToolTokens } from "./ToolProtocol.ts";
 import type { Summarizer } from "./Compaction.ts";
 
 export class ChatSession {
@@ -25,9 +27,19 @@ export class ChatSession {
     this.Messages.push({ Role: "User", Content });
   }
 
-  /** Render the prompt string for the model, cueing it to produce the next assistant turn. */
+  /** Render the prompt string for the model, cueing it to produce the next assistant turn.
+   *  NOTE: for a special-token model this string must NOT be re-encoded with SpecialTokenizer.Encode
+   *  (that re-scans content and lets it smuggle control tokens) — use RenderPromptIds instead. Kept
+   *  for base models and prompt inspection. */
   RenderPrompt(): string {
     return RenderChat(this.Messages, true);
+  }
+
+  /** Render the prompt directly to token ids — the SAFE serving path for special-token (chat) models.
+   *  Content is base-encoded (never re-scanned for specials), so untrusted user/tool text can't forge
+   *  role/turn boundaries. Uses the same per-message core as training, so no train/serve skew. */
+  RenderPromptIds(Tok: SpecialTokenizer): number[] {
+    return RenderChatToIds(this.Messages, Tok, true);
   }
 
   /**
@@ -40,7 +52,11 @@ export class ChatSession {
     const System = this.Messages[0]?.Role === "System" ? [this.Messages[0]] : [];
     const Body = this.Messages.slice(System.length);
     if (Body.length <= Keep) return 0;
-    const Dropped = Body.length - Keep;
+    let Dropped = Body.length - Keep;
+    // Don't strand a tool RESULT without its preceding tool CALL: if the first kept turn is a tool
+    // result, keep one more turn (its call) so the call/result pair stays intact in the retained window.
+    if (Dropped > 0 && (Body[Dropped]?.Content.includes(ToolTokens.ResultStart) ?? false)) Dropped -= 1;
+    if (Dropped <= 0) return 0;
     const DroppedMessages = Body.slice(0, Dropped);
     const Recent = Body.slice(Dropped);
     const Content = Summarize ? Summarize(DroppedMessages) : `[${Dropped} earlier turn(s) elided to save context]`;

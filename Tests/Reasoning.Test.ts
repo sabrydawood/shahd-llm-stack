@@ -12,6 +12,11 @@ import {
   MajorityVote,
   SelfConsistency,
   TreeOfThoughtsSearch,
+  ExtractAnswer,
+  NormalizeAnswer,
+  AnswerKey,
+  SequenceLogProb,
+  BestOfNByLogProb,
 } from "../Brain/Reasoning/ReasoningBarrel.ts";
 
 const GreedyOpts = { Temperature: 0, TopK: 0, TopP: 1 };
@@ -70,6 +75,33 @@ test("self-consistency votes over sampled generations", () => {
   let I = 0;
   const Vote = SelfConsistency(() => Outputs[I++], 3, (T) => T.split("=")[1]);
   expect(Vote.Winner).toBe("7");
+});
+
+test("answer extraction pulls the <answer> span, ignores thinking, and normalizes", () => {
+  expect(ExtractAnswer(WrapThinking("compute 6*7", "<answer>42</answer>"))).toBe("42");
+  expect(ExtractAnswer("some reasoning\nfinal line")).toBe("final line"); // fallback: last non-empty line
+  expect(NormalizeAnswer("  42.0 ")).toBe("42");
+  expect(NormalizeAnswer("The Answer.")).toBe("the answer");
+  expect(AnswerKey("<answer>1,000</answer>")).toBe("1000");
+});
+
+test("self-consistency votes together across trivial formatting differences (normalized key)", () => {
+  const Outputs = ["<answer>42</answer>", "<answer>42.</answer>", "<answer> 42 </answer>", "<answer>7</answer>"];
+  let I = 0;
+  const Vote = SelfConsistency(() => Outputs[I++]!, 4, ExtractAnswer, NormalizeAnswer);
+  expect(NormalizeAnswer(Vote.Winner)).toBe("42");
+  expect(Vote.Count).toBe(3); // the three 42-variants counted as one answer
+});
+
+test("model-backed sequence scoring is finite and best-of-N returns the model's top-scoring candidate", () => {
+  const Model = TinyModel(2, 3);
+  const Score = SequenceLogProb(Model, [1, 2, 3, 4, 5]);
+  expect(Number.isFinite(Score)).toBe(true);
+  expect(Score).toBeLessThanOrEqual(0); // average log-prob is <= 0
+  const Cands = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+  const Idx = BestOfNByLogProb(Model, Cands);
+  const Scores = Cands.map((C) => SequenceLogProb(Model, C));
+  expect(Scores[Idx]).toBe(Math.max(...Scores)); // returns the argmax by model confidence
 });
 
 test("tree of thoughts beam search finds the highest-scoring path", () => {

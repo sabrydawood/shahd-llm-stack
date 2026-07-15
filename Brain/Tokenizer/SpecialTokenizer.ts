@@ -27,6 +27,16 @@ export class SpecialTokenizer implements Tokenizer {
     return Found;
   }
 
+  // Encode through the BASE tokenizer ONLY — never emits a special-token id, even if the text
+  // literally contains a reserved string like "<|assistant|>". This is the control/data channel
+  // separation: UNTRUSTED text (user messages, tool/MCP results, file contents) MUST be encoded with
+  // this, never with Encode(), so it can't smuggle a real control token into the stream. Special
+  // boundary tokens are then spliced in programmatically via Id() by the caller (RenderForTraining /
+  // RenderChatToIds), which is the only sanctioned way to produce a control token.
+  EncodeBase(Text: string): number[] {
+    return this.Base.Encode(Text);
+  }
+
   Encode(Text: string): number[] {
     const Out: number[] = [];
     let Buffer = "";

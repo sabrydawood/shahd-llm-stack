@@ -8,7 +8,7 @@
 import type { ChatMessage } from "./ChatTemplate.ts";
 import type { ToolExemplar } from "./ToolUseExamples.ts";
 import { BuildToolConversation, ToolUseExemplars } from "./ToolUseExamples.ts";
-import { WrapThinking } from "../Reasoning/ThinkingMode.ts";
+import { WrapThinkingAnswer, DefaultThinkingSystemPrompt } from "../Reasoning/AnswerExtraction.ts";
 import type { SeededRng } from "../Random/SeededRng.ts";
 
 const System = "You are Shahd, a helpful coding assistant.";
@@ -58,12 +58,23 @@ function ArithmeticToolConversation(Rng: SeededRng): ChatMessage[] {
   return BuildToolConversation(Exemplar, System);
 }
 
-// A visible think -> answer example: teaches the <|think|>…<|endthink|> scaffold before the answer.
+// A visible think -> answer example in the CANONICAL <|think|>…<|endthink|><answer>…</answer> format
+// the serving extractor parses (so training and inference agree). Varied across ALL operations and
+// 2-digit operands — teaching the think-then-answer SCAFFOLD generally, not one memorized single-digit
+// addition template. Uses DefaultThinkingSystemPrompt so the model is asked at serving to do exactly
+// what it was taught here.
 function ThinkingConversation(Rng: SeededRng): ChatMessage[] {
-  const A = 2 + Math.floor(Rng.NextFloat() * 8);
-  const B = 2 + Math.floor(Rng.NextFloat() * 8);
-  const Answer = WrapThinking(`I add ${A} and ${B} to get ${A + B}.`, `${A} + ${B} = ${A + B}.`);
-  return [{ Role: "System", Content: System }, { Role: "User", Content: `What is ${A} + ${B}? Think first.` }, { Role: "Assistant", Content: Answer }];
+  const A = 2 + Math.floor(Rng.NextFloat() * 97);
+  const B = 2 + Math.floor(Rng.NextFloat() * 97);
+  const [Op, Fn] = Ops[Math.floor(Rng.NextFloat() * Ops.length)]!;
+  const Result = Fn(A, B);
+  const Reasoning = `The problem is ${A} ${Op} ${B}. Applying ${Op} to ${A} and ${B} gives ${Result}.`;
+  const Assistant = WrapThinkingAnswer(Reasoning, String(Result));
+  return [
+    { Role: "System", Content: DefaultThinkingSystemPrompt },
+    { Role: "User", Content: `What is ${A} ${Op} ${B}? Think first.` },
+    { Role: "Assistant", Content: Assistant },
+  ];
 }
 
 export type CodeSample = { Lang: string; Content: string };

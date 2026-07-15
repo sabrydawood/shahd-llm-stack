@@ -9,6 +9,7 @@ export type QualityOptions = {
   MaxLongLineFraction?: number; // fraction of lines over 400 chars
   MinPrintableFraction?: number; // guards against binary/base64 blobs
   MinAlphaFraction?: number; // guards against near-empty / symbol soup
+  MaxDupLineFraction?: number; // fraction of non-empty lines that are duplicates (boilerplate/degenerate)
   Threshold?: number; // pass if Score >= Threshold
   Prose?: boolean; // natural-language text (dialogue/articles): skip the code-only line-length checks
 };
@@ -25,6 +26,7 @@ export function ScoreCodeQuality(Text: string, Options: QualityOptions = {}): Qu
   const MaxLongLineFraction = Options.MaxLongLineFraction ?? 0.1;
   const MinPrintableFraction = Options.MinPrintableFraction ?? 0.95;
   const MinAlphaFraction = Options.MinAlphaFraction ?? 0.25;
+  const MaxDupLineFraction = Options.MaxDupLineFraction ?? 0.5;
   const Threshold = Options.Threshold ?? 0.6;
 
   const Reasons: string[] = [];
@@ -34,6 +36,16 @@ export function ScoreCodeQuality(Text: string, Options: QualityOptions = {}): Qu
   const NonEmpty = Lines.filter((L) => L.trim().length > 0);
   if (NonEmpty.length === 0) {
     return { Score: 0, Passed: false, Reasons: ["empty"] };
+  }
+
+  // Repetition guard (Gopher/C4-style): heavily duplicated lines signal boilerplate or degenerate
+  // (e.g. "a\na\na\n…") text that the length/printable checks miss because each line looks clean.
+  if (NonEmpty.length >= 8) {
+    const DupFraction = 1 - new Set(NonEmpty.map((L) => L.trim())).size / NonEmpty.length;
+    if (DupFraction > MaxDupLineFraction) {
+      Score -= 0.3;
+      Reasons.push(`duplicate-line fraction ${DupFraction.toFixed(2)} > ${MaxDupLineFraction} (boilerplate/degenerate?)`);
+    }
   }
 
   // Line-length signals detect MINIFIED/generated CODE — they do not apply to prose (a paragraph is

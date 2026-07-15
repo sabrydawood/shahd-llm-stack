@@ -7,24 +7,39 @@ import { ChatTokens } from "../Sft/ChatTemplate.ts";
 
 export type SplitThought = { Thinking: string; Answer: string; HadThinking: boolean };
 
-/** Separate a generation into its <|think|>…<|endthink|> block and the visible answer. */
+/** Separate a generation into its <|think|>…<|endthink|> block(s) and the visible answer. Walks the
+ *  WHOLE string with a cursor so a second (or later) think block in the same generation is stripped
+ *  too, not spliced verbatim into the answer. */
 export function SplitThinking(Text: string): SplitThought {
-  const Start = Text.indexOf(ChatTokens.Think);
-  if (Start === -1) {
-    return { Thinking: "", Answer: Text.trim(), HadThinking: false };
+  const ThinkingParts: string[] = [];
+  const AnswerParts: string[] = [];
+  let Cursor = 0;
+  let HadThinking = false;
+  while (true) {
+    const Start = Text.indexOf(ChatTokens.Think, Cursor);
+    if (Start === -1) {
+      AnswerParts.push(Text.slice(Cursor));
+      break;
+    }
+    HadThinking = true;
+    AnswerParts.push(Text.slice(Cursor, Start));
+    const End = Text.indexOf(ChatTokens.EndThink, Start + ChatTokens.Think.length);
+    if (End === -1) {
+      // Unclosed thinking (generation cut off mid-scratchpad — common for a small model / small token
+      // budget). Everything from <|think|> onward is incomplete reasoning: HIDE it, never leak it as
+      // the answer. Nothing after a dangling think sentinel can be a visible span.
+      ThinkingParts.push(Text.slice(Start + ChatTokens.Think.length));
+      Cursor = Text.length;
+      break;
+    }
+    ThinkingParts.push(Text.slice(Start + ChatTokens.Think.length, End));
+    Cursor = End + ChatTokens.EndThink.length;
   }
-  const End = Text.indexOf(ChatTokens.EndThink, Start + ChatTokens.Think.length);
-  if (End === -1) {
-    // Unclosed thinking (generation cut off mid-scratchpad — common for a small model / small token
-    // budget). Everything from <|think|> onward is incomplete reasoning: HIDE it, never leak it as the
-    // answer. The visible answer is only whatever preceded the (now-dangling) think sentinel.
-    const Thinking = Text.slice(Start + ChatTokens.Think.length).trim();
-    const Answer = Text.slice(0, Start).trim();
-    return { Thinking, Answer, HadThinking: true };
-  }
-  const Thinking = Text.slice(Start + ChatTokens.Think.length, End).trim();
-  const Answer = (Text.slice(0, Start) + Text.slice(End + ChatTokens.EndThink.length)).trim();
-  return { Thinking, Answer, HadThinking: true };
+  return {
+    Thinking: ThinkingParts.join("\n\n").trim(),
+    Answer: AnswerParts.join("").trim(),
+    HadThinking,
+  };
 }
 
 /** Just the user-facing answer (thinking removed). */

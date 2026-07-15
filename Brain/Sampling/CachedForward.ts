@@ -150,9 +150,16 @@ export function CachedGenerate(
   Rng: SeededRng,
 ): number[] {
   return WithTapeOff(() => {
-    const Cache = new KvCache(Model.Blocks.length, Model.Config.Model.NumHeads, Model.Config.Derived.HeadDim);
     const BlockSize = Model.Config.Model.BlockSize;
     const VocabSize = Model.Config.Model.VocabSize;
+    // Mirrors the empty-prompt guard below: an oversized prompt must fail loudly too, not silently
+    // `break` on the first generation step and hand back PromptIds unchanged with zero new tokens.
+    if (PromptIds.length >= BlockSize) {
+      throw new Error(
+        `CachedGenerate: prompt length ${PromptIds.length} already fills or exceeds BlockSize ${BlockSize}; no new tokens can be generated`,
+      );
+    }
+    const Cache = new KvCache(Model.Blocks.length, Model.Config.Model.NumHeads, Model.Config.Derived.HeadDim, BlockSize);
     const Ids = [...PromptIds];
 
     let LastLogits: Float64Array | null = null;

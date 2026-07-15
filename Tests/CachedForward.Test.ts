@@ -18,7 +18,7 @@ test("cached step logits are numerically identical to the full Tensor forward (t
   const Seq = [1, 5, 2, 8, 3, 0, 7];
   const V = Model.Config.Model.VocabSize;
   const Full = WithTapeOff(() => Model.Forward(Seq));
-  const Cache = new KvCache(Model.Blocks.length, Model.Config.Model.NumHeads, Model.Config.Derived.HeadDim);
+  const Cache = new KvCache(Model.Blocks.length, Model.Config.Model.NumHeads, Model.Config.Derived.HeadDim, Model.Config.Model.BlockSize);
   for (let P = 0; P < Seq.length; P++) {
     const Logits = CachedForwardStep(Model, Cache, Seq[P], P);
     for (let Vi = 0; Vi < V; Vi++) {
@@ -32,7 +32,7 @@ test("cached step logits match the full forward (untied, single head)", () => {
   const Seq = [2, 0, 5, 1, 3];
   const V = Model.Config.Model.VocabSize;
   const Full = WithTapeOff(() => Model.Forward(Seq));
-  const Cache = new KvCache(Model.Blocks.length, Model.Config.Model.NumHeads, Model.Config.Derived.HeadDim);
+  const Cache = new KvCache(Model.Blocks.length, Model.Config.Model.NumHeads, Model.Config.Derived.HeadDim, Model.Config.Model.BlockSize);
   for (let P = 0; P < Seq.length; P++) {
     const Logits = CachedForwardStep(Model, Cache, Seq[P], P);
     for (let Vi = 0; Vi < V; Vi++) {

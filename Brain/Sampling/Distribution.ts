@@ -1,8 +1,9 @@
 // The next-token probability distribution, factored out so both the sampler and speculative sampling
 // share ONE implementation of temperature + top-k + top-p (rule #4). ProbsFromLogits returns a
 // full-vocab distribution (zeros outside the kept set, renormalized over it); SampleFromDistribution
-// draws from it in descending-probability order (the reference sampler's order, so behavior is
-// unchanged). SamplingOptions lives here (the lowest layer that needs it); Sampler re-exports it.
+// draws from it via inverse-CDF in natural (ascending) index order — correct for any fixed
+// enumeration order, so no sort is needed. SamplingOptions lives here (the lowest layer that needs
+// it); Sampler re-exports it.
 
 import type { SeededRng } from "../Random/SeededRng.ts";
 
@@ -12,21 +13,27 @@ export type SamplingOptions = {
   TopP: number; // 1 => disabled
 };
 
+/** Argmax of a logits row [Offset .. Offset+VocabSize) — the one greedy-selection loop shared by
+ *  ProbsFromLogits' Temperature<=0 branch and Sampler.SampleFromLogits' Temperature<=0 branch. */
+export function ArgmaxOf(Logits: Float64Array, Offset: number, VocabSize: number): number {
+  let Best = 0;
+  let BestVal = -Infinity;
+  for (let J = 0; J < VocabSize; J++) {
+    const Val = Logits[Offset + J];
+    if (Val > BestVal) {
+      BestVal = Val;
+      Best = J;
+    }
+  }
+  return Best;
+}
+
 /** Temperature-scaled softmax with top-k then top-p, renormalized over the kept set. Temperature<=0
  *  returns a one-hot distribution at the argmax (so every consumer gets the documented greedy). */
 export function ProbsFromLogits(Logits: Float64Array, Offset: number, VocabSize: number, Options: SamplingOptions): Float64Array {
   if (Options.Temperature <= 0) {
     const Greedy = new Float64Array(VocabSize);
-    let Best = 0;
-    let BestVal = -Infinity;
-    for (let J = 0; J < VocabSize; J++) {
-      const Val = Logits[Offset + J];
-      if (Val > BestVal) {
-        BestVal = Val;
-        Best = J;
-      }
-    }
-    Greedy[Best] = 1;
+    Greedy[ArgmaxOf(Logits, Offset, VocabSize)] = 1;
     return Greedy;
   }
   const Temperature = Options.Temperature;
@@ -71,15 +78,17 @@ export function ProbsFromLogits(Logits: Float64Array, Offset: number, VocabSize:
   return Out;
 }
 
-/** Sample an index from a probability vector (descending-probability walk; one RNG draw). */
+/** Sample an index from a probability vector (inverse-CDF walk in natural index order — correct for
+ *  any fixed enumeration order, so no sort is needed; one RNG draw). */
 export function SampleFromDistribution(Probs: Float64Array, Rng: SeededRng): number {
-  const Indices: number[] = [];
-  for (let J = 0; J < Probs.length; J++) if (Probs[J] > 0) Indices.push(J);
-  Indices.sort((A, B) => Probs[B] - Probs[A]);
+  let LastNonZero = -1;
   let R = Rng.NextFloat();
-  for (const Idx of Indices) {
-    R -= Probs[Idx];
-    if (R <= 0) return Idx;
+  for (let J = 0; J < Probs.length; J++) {
+    const P = Probs[J];
+    if (P <= 0) continue;
+    LastNonZero = J;
+    R -= P;
+    if (R <= 0) return J;
   }
-  return Indices.length > 0 ? Indices[Indices.length - 1] : 0;
+  return LastNonZero >= 0 ? LastNonZero : 0;
 }

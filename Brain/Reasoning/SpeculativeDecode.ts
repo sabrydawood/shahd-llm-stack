@@ -36,6 +36,7 @@ export function SpeculativeDecodeGreedy(
   Gamma = 4,
 ): SpeculativeResult {
   return WithTapeOff(() => {
+    if (PromptIds.length === 0) throw new Error("SpeculativeDecodeGreedy: empty prompt");
     const Vocab = Target.Config.Model.VocabSize;
     const BlockSize = Target.Config.Model.BlockSize;
     const DraftBlockSize = Draft.Config.Model.BlockSize; // the draft may have a smaller context

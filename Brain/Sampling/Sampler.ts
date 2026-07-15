@@ -5,7 +5,7 @@
 
 import type { SeededRng } from "../Random/SeededRng.ts";
 import type { SamplingOptions } from "./Distribution.ts";
-import { ProbsFromLogits, SampleFromDistribution } from "./Distribution.ts";
+import { ArgmaxOf, ProbsFromLogits, SampleFromDistribution } from "./Distribution.ts";
 
 export type { SamplingOptions } from "./Distribution.ts";
 
@@ -20,16 +20,7 @@ export function SampleFromLogits(
   Rng: SeededRng,
 ): number {
   if (Options.Temperature <= 0) {
-    let Best = 0;
-    let BestVal = -Infinity;
-    for (let J = 0; J < VocabSize; J++) {
-      const Val = Logits[Offset + J];
-      if (Val > BestVal) {
-        BestVal = Val;
-        Best = J;
-      }
-    }
-    return Best;
+    return ArgmaxOf(Logits, Offset, VocabSize);
   }
   return SampleFromDistribution(ProbsFromLogits(Logits, Offset, VocabSize, Options), Rng);
 }

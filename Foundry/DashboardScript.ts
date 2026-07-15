@@ -5,7 +5,7 @@
 // DashboardHtml.ts — it MUST stay free of backticks, ${ ... } and the closing script sequence; all
 // strings use single quotes + concatenation. Kept in its own file so each file stays small.
 export const DashboardScript = `
- var H=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+ var H=function(s){return String(s==null?'':s).replace(/[&<>"'/]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#47;'}[c];});};
  var Q=function(id){return document.getElementById(id);};
  var fmtN=function(n){return (Number(n)||0).toLocaleString();};
  var fmtB=function(n){n=Number(n)||0;return n>=1e9?(n/1e9).toFixed(2)+' GB':n>=1e6?(n/1e6).toFixed(1)+' MB':n>=1e3?(n/1e3).toFixed(0)+' KB':n+' B';};

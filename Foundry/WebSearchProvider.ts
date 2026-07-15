@@ -9,22 +9,47 @@ import type { SourceInput } from "./Ingest.ts";
 import { HtmlToText } from "./HtmlToText.ts";
 
 export type SearchHit = { Url: string; Title: string };
-export type SearchBackend = (Query: string, Limit: number) => Promise<SearchHit[]>;
-export type PageFetch = (Url: string) => Promise<string>;
+export type SearchBackend = (Query: string, Limit: number, Signal?: AbortSignal) => Promise<SearchHit[]>;
+export type PageFetch = (Url: string, Signal?: AbortSignal) => Promise<string>;
 
 export type WebSearchOptions = { Search: SearchBackend; Fetch?: PageFetch; MaxChars?: number };
 
+// Read a response body with a hard byte ceiling instead of buffering the whole page: the search
+// backend returns arbitrary third-party URLs, so an unbounded `.text()` lets one huge/streaming page
+// spike memory before MaxChars ever truncates. Stop reading once enough bytes are in to fill MaxChars
+// after HtmlToText strips markup (~8x headroom for tags/whitespace), then decode only what was read.
+async function FetchCapped(Url: string, MaxBytes: number, Signal?: AbortSignal): Promise<string> {
+  const Response = await fetch(Url, { signal: Signal });
+  const Body = Response.body;
+  if (Body === null) return (await Response.text()).slice(0, MaxBytes);
+  const Reader = Body.getReader();
+  const Decoder = new TextDecoder();
+  let Text = "";
+  for (;;) {
+    const { done: Done, value: Value } = await Reader.read();
+    if (Done) break;
+    if (Value !== undefined) {
+      Text += Decoder.decode(Value, { stream: true });
+      if (Text.length >= MaxBytes) {
+        await Reader.cancel();
+        break;
+      }
+    }
+  }
+  return Text;
+}
+
 export function CreateWebSearchProvider(Options: WebSearchOptions): WebProvider {
-  const Fetch = Options.Fetch ?? (async (Url: string): Promise<string> => (await fetch(Url)).text());
   const MaxChars = Options.MaxChars ?? 20000;
+  const Fetch = Options.Fetch ?? ((Url: string, Signal?: AbortSignal): Promise<string> => FetchCapped(Url, MaxChars * 8, Signal));
   return {
     Name: "web-search",
-    Fetch: async (Query: string, Limit: number): Promise<SourceInput[]> => {
-      const Hits = await Options.Search(Query, Limit);
+    Fetch: async (Query: string, Limit: number, Signal?: AbortSignal): Promise<SourceInput[]> => {
+      const Hits = await Options.Search(Query, Limit, Signal);
       const Out: SourceInput[] = [];
       for (const Hit of Hits) {
         try {
-          const Text = HtmlToText(await Fetch(Hit.Url)).slice(0, MaxChars);
+          const Text = HtmlToText(await Fetch(Hit.Url, Signal)).slice(0, MaxChars);
           if (Text.length > 0) {
             Out.push({ Source: "web-search", License: "unknown", Lang: "unknown", Content: Text, Provenance: Hit.Url, Origin: "web-general" });
           }

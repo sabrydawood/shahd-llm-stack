@@ -15,7 +15,10 @@ export type WebProvider = {
   // Wikipedia random) can keep producing FRESH data every run. The dashboard uses this to explain why
   // a re-run added nothing ("bounded, already fully collected") vs. suggest running again to grow.
   Semantics?: "bounded" | "streaming";
-  Fetch: (Query: string, Limit: number) => Promise<SourceInput[]>;
+  // Signal (optional) lets a caller (e.g. the dashboard's per-collect AbortController) cancel a run
+  // that is still fetching. Providers that thread it into their fetch() calls abort in-flight
+  // requests; ones that don't simply ignore it (the extra optional param is structurally safe).
+  Fetch: (Query: string, Limit: number, Signal?: AbortSignal) => Promise<SourceInput[]>;
 };
 
 // Incremental sink: a repo provider calls this the moment a repo is downloaded+assessed, so the
@@ -35,12 +38,13 @@ export async function IngestFromWeb(
   PerQuery = 10,
   EmbeddingDim = 256,
   OnProgress?: IngestProgress,
+  Signal?: AbortSignal,
 ): Promise<IngestStats> {
   const Collected: SourceInput[] = [];
   for (const Provider of Providers) {
     for (const Query of Queries) {
       try {
-        Collected.push(...(await Provider.Fetch(Query, PerQuery)));
+        Collected.push(...(await Provider.Fetch(Query, PerQuery, Signal)));
       } catch (Caught) {
         // A provider/query failure is non-fatal — skip it and keep going — but log it, never swallow.
         console.warn(`[web] provider ${Provider.Name} query "${Query}" failed: ${(Caught as Error).message}`);

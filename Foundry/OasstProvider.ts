@@ -27,9 +27,25 @@ type OasstNode = { text?: string; role?: string; lang?: string; message_id?: str
 type OasstTree = { prompt?: OasstNode };
 
 async function DefaultFetch(Url: string): Promise<Uint8Array> {
-  const Response = await fetch(Url, { headers: { "User-Agent": "shahd-foundry" } }); // follows the HF 302 redirect
-  if (!Response.ok) throw new Error(`OASST fetch ${Response.status}`);
-  return new Uint8Array(await Response.arrayBuffer());
+  // The HF/xethub CDN occasionally drops a long (~34MB) download mid-stream ("socket connection closed
+  // unexpectedly"); the download itself is fine, it is just a transient blip. Retry with backoff on a
+  // fresh connection so one dropped socket doesn't fail the whole collect run. A real 4xx/5xx (not ok)
+  // is not retried — only network/socket errors are.
+  const MaxAttempts = 4;
+  let LastError = "";
+  for (let Attempt = 1; Attempt <= MaxAttempts; Attempt++) {
+    try {
+      const Response = await fetch(Url, { headers: { "User-Agent": "shahd-foundry" } }); // follows the HF 302 redirect
+      if (!Response.ok) throw new Error(`OASST fetch ${Response.status}`); // a status error is not transient — fail fast
+      return new Uint8Array(await Response.arrayBuffer());
+    } catch (Caught) {
+      LastError = (Caught as Error).message;
+      if (LastError.includes("OASST fetch ")) throw Caught; // HTTP status error: do not retry
+      console.warn(`[oasst] download attempt ${Attempt}/${MaxAttempts} failed: ${LastError}`);
+      if (Attempt < MaxAttempts) await new Promise((Resolve) => setTimeout(Resolve, 1500 * Attempt)); // 1.5s, 3s, 4.5s
+    }
+  }
+  throw new Error(`OASST download failed after ${MaxAttempts} attempts: ${LastError}`);
 }
 
 // Walk a message tree: each prompter -> its first assistant reply is one conversation; recurse into

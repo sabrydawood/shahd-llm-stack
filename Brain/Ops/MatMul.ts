@@ -36,6 +36,8 @@ export function MatMul(A: Tensor, B: Tensor): Tensor {
         for (let J = 0; J < N; J++) Out.Data[I * N + J] += AVal * B.Data[P * N + J];
       }
     }
+  } else if (Backend.MatMulInto !== undefined) {
+    Backend.MatMulInto(A.Data, B.Data, Out.Data, M, K, N); // zero-copy: no allocation, no .set copy
   } else {
     Out.Data.set(Backend.MatMul(A.Data, B.Data, M, K, N));
   }
@@ -66,6 +68,16 @@ export function MatMul(A: Tensor, B: Tensor): Tensor {
         }
         return;
       }
+      if (BackwardBackend.MatMulNtAcc !== undefined && BackwardBackend.MatMulTnAcc !== undefined) {
+        // Native backward plumbing: both halves accumulate straight into the grad buffers with
+        // ZERO JS-side transposes. dA[M,K] += dOut[M,N] @ Bᵀ — and the stored B[K,N] row-major IS
+        // the [outCols=K, inner=N] pre-transposed operand the NT kernel wants, so nothing moves.
+        BackwardBackend.MatMulNtAcc(Out.Grad, B.Data, A.Grad, M, N, K);
+        // dB[K,N] += Aᵀ @ dOut — the TN kernel reads A's columns in place.
+        BackwardBackend.MatMulTnAcc(A.Data, Out.Grad, B.Grad, M, K, N);
+        return;
+      }
+      // Fallback for backends without the native backward halves (e.g. TsBackend, an older DLL):
       // dA = Out.Grad @ Bᵀ  (M,N)@(N,K) -> (M,K)
       const DA = BackwardBackend.MatMul(Out.Grad, Transpose(B.Data, K, N), M, N, K);
       for (let I = 0; I < M * K; I++) A.Grad[I] += DA[I];

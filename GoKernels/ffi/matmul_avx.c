@@ -38,8 +38,10 @@ static inline double HSum256(__m256d V) {
 }
 
 // O[i,j] = dot(A[i,:], BT[j,:]) for i in [RowStart, RowEnd), all j in [0, N).
+// Acc != 0 accumulates (O[i,j] += ...) instead of overwriting — the backward pass adds gradient
+// contributions into buffers that already hold earlier sequences' gradients (grad accumulation).
 void MatMulRowsAvx(const double *A, const double *BT, double *O,
-                   int RowStart, int RowEnd, int K, int N) {
+                   int RowStart, int RowEnd, int K, int N, int Acc) {
     const int Block = 8;
     int I = RowStart;
 
@@ -81,14 +83,25 @@ void MatMulRowsAvx(const double *A, const double *BT, double *O,
                 R4 += A4[P] * Bv; R5 += A5[P] * Bv; R6 += A6[P] * Bv; R7 += A7[P] * Bv;
             }
 
-            O[(size_t)(I + 0) * N + J] = R0;
-            O[(size_t)(I + 1) * N + J] = R1;
-            O[(size_t)(I + 2) * N + J] = R2;
-            O[(size_t)(I + 3) * N + J] = R3;
-            O[(size_t)(I + 4) * N + J] = R4;
-            O[(size_t)(I + 5) * N + J] = R5;
-            O[(size_t)(I + 6) * N + J] = R6;
-            O[(size_t)(I + 7) * N + J] = R7;
+            if (Acc) {
+                O[(size_t)(I + 0) * N + J] += R0;
+                O[(size_t)(I + 1) * N + J] += R1;
+                O[(size_t)(I + 2) * N + J] += R2;
+                O[(size_t)(I + 3) * N + J] += R3;
+                O[(size_t)(I + 4) * N + J] += R4;
+                O[(size_t)(I + 5) * N + J] += R5;
+                O[(size_t)(I + 6) * N + J] += R6;
+                O[(size_t)(I + 7) * N + J] += R7;
+            } else {
+                O[(size_t)(I + 0) * N + J] = R0;
+                O[(size_t)(I + 1) * N + J] = R1;
+                O[(size_t)(I + 2) * N + J] = R2;
+                O[(size_t)(I + 3) * N + J] = R3;
+                O[(size_t)(I + 4) * N + J] = R4;
+                O[(size_t)(I + 5) * N + J] = R5;
+                O[(size_t)(I + 6) * N + J] = R6;
+                O[(size_t)(I + 7) * N + J] = R7;
+            }
         }
     }
 
@@ -104,7 +117,43 @@ void MatMulRowsAvx(const double *A, const double *BT, double *O,
             }
             double R = HSum256(S);
             for (; P < K; P++) R += Ai[P] * Bt[P];
-            O[(size_t)I * N + J] = R;
+            if (Acc) O[(size_t)I * N + J] += R;
+            else O[(size_t)I * N + J] = R;
+        }
+    }
+}
+
+// DB[p,j] (+)= sum_i A[i,p] * DOut[i,j] for p in [PStart, PEnd), all j — i.e. DB = Aᵀ @ DOut
+// without EITHER operand being transposed in memory. This is the dB half of the matmul backward
+// (dB += Aᵀ @ dOut); the dA half reuses MatMulRowsAvx, because dOut @ Bᵀ wants exactly the BT
+// layout B is already stored in.
+//
+// Loop order p → i → j: DB[p,:] stays hot in L1 across the whole i loop (N ≤ a few thousand
+// doubles at this model's shapes) while DOut streams row by row. Broadcast-FMA down j means no
+// horizontal sums at all. Per (p,j) the sum runs over i ASCENDING — the same order as the scalar
+// TS backward — so the only numeric drift vs TS is FMA's single rounding.
+//
+// The Av == 0 skip mirrors the TS path: activation gradients regularly contain hard zeros
+// (masked positions), and skipping a full row of FMAs is worth one compare.
+void MatMulTnAvx(const double *A, const double *DOut, double *DB,
+                 int PStart, int PEnd, int M, int K, int N, int Acc) {
+    for (int P = PStart; P < PEnd; P++) {
+        double *Db = DB + (size_t)P * N;
+        if (!Acc) {
+            for (int J = 0; J < N; J++) Db[J] = 0.0;
+        }
+        for (int I = 0; I < M; I++) {
+            double Av = A[(size_t)I * K + P];
+            if (Av == 0.0) continue;
+            const double *Dr = DOut + (size_t)I * N;
+            __m256d Vv = _mm256_set1_pd(Av);
+            int J = 0;
+            for (; J + 4 <= N; J += 4) {
+                __m256d D = _mm256_loadu_pd(Db + J);
+                D = _mm256_fmadd_pd(Vv, _mm256_loadu_pd(Dr + J), D);
+                _mm256_storeu_pd(Db + J, D);
+            }
+            for (; J < N; J++) Db[J] += Av * Dr[J];
         }
     }
 }

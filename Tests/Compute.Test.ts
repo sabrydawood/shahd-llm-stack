@@ -141,6 +141,113 @@ test("Go FFI kernel agrees with the inline TS path within f64 accumulation toler
   }
 });
 
+test("GoFfi Into/NtAcc/TnAcc kernels match the TS reference and honor accumulate semantics", () => {
+  // These are the backward-plumbing entry points: MatMulInto (zero-copy forward), MatMulNtAcc
+  // (dA += dOut @ Bᵀ with B consumed in place) and MatMulTnAcc (dB += Aᵀ @ dOut with A consumed in
+  // place). They accumulate into SEEDED buffers here because that is their real calling convention —
+  // grad buffers already hold earlier sequences' gradients. Shapes hit the same kernel edge paths as
+  // the forward test (M % 8, K % 4, degenerate).
+  const Ffi = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "GoFfi", Precision: "F64" } }, UseCli: false, UseEnv: false }));
+  if (Ffi.FellBack) return; // no DLL on this machine (e.g. CI) — nothing to check
+  const Backend = GetActiveBackend();
+  if (Backend === null) throw new Error("GoFfi reported active but GetActiveBackend() is null");
+  if (Backend.MatMulInto === undefined || Backend.MatMulNtAcc === undefined || Backend.MatMulTnAcc === undefined) {
+    // A DLL predating the backward kernels would silently fall back to the slow JS transpose path —
+    // that is graceful in production but in THIS repo it means someone forgot to rebuild.
+    throw new Error("GoKernels/matmul.dll is stale: NT/TN symbols missing — rebuild via `go build -buildmode=c-shared -o ../matmul.dll ./` in GoKernels/ffi (PowerShell)");
+  }
+
+  const Transpose = (Data: Float64Array, Rows: number, Cols: number): Float64Array => {
+    const T = new Float64Array(Rows * Cols);
+    for (let R = 0; R < Rows; R++) for (let C = 0; C < Cols; C++) T[C * Rows + R] = Data[R * Cols + C];
+    return T;
+  };
+  const FillRand = (Size: number, Rng: SeededRng): Float64Array => {
+    const Buf = new Float64Array(Size);
+    for (let I = 0; I < Size; I++) Buf[I] = Rng.NextGaussian();
+    return Buf;
+  };
+  const ExpectClose = (Got: Float64Array, Want: Float64Array): void => {
+    let MaxRel = 0;
+    for (let I = 0; I < Want.length; I++) {
+      MaxRel = Math.max(MaxRel, Math.abs(Want[I] - Got[I]) / (Math.abs(Want[I]) + 1e-9));
+    }
+    expect(MaxRel).toBeLessThan(1e-10);
+  };
+
+  const Ref = new TsBackend();
+  const Rng = new SeededRng(11);
+  const Shapes: [number, number, number][] = [
+    [256, 128, 512], // main blocked path
+    [7, 5, 3], // M % 8 != 0 AND K % 4 != 0
+    [13, 128, 9], // M % 8 != 0 only
+    [16, 13, 5], // K % 4 != 0 only
+    [1, 1, 1], // degenerate
+  ];
+  for (const [M, K, N] of Shapes) {
+    const A = FillRand(M * K, Rng);
+    const B = FillRand(K * N, Rng);
+
+    // MatMulInto: overwrites a dirty buffer completely.
+    const Into = new Float64Array(M * N).fill(7);
+    Backend.MatMulInto(A, B, Into, M, K, N);
+    ExpectClose(Into, Ref.MatMul(A, B, M, K, N));
+
+    // MatMulNtAcc: Out[M,N] += A[M,K] @ Btᵀ with Bt stored [N,K].
+    const Bt = FillRand(N * K, Rng);
+    const Seed = FillRand(M * N, Rng);
+    const NtOut = Float64Array.from(Seed);
+    Backend.MatMulNtAcc(A, Bt, NtOut, M, K, N);
+    const NtWant = Ref.MatMul(A, Transpose(Bt, N, K), M, K, N);
+    for (let I = 0; I < NtWant.length; I++) NtWant[I] += Seed[I];
+    ExpectClose(NtOut, NtWant);
+
+    // MatMulTnAcc: Db[K,N] += Aᵀ @ DOut with A stored [M,K].
+    const DOut = FillRand(M * N, Rng);
+    const DbSeed = FillRand(K * N, Rng);
+    const Db = Float64Array.from(DbSeed);
+    Backend.MatMulTnAcc(A, DOut, Db, M, K, N);
+    const TnWant = Ref.MatMul(Transpose(A, M, K), DOut, K, M, N);
+    for (let I = 0; I < TnWant.length; I++) TnWant[I] += DbSeed[I];
+    ExpectClose(Db, TnWant);
+  }
+});
+
+test("GoFfi-routed backward gradients match the inline backward within kernel tolerance", () => {
+  // End-to-end guard for the Ops/MatMul wiring of the native backward halves: the same tape node,
+  // once through the inline scalar path and once through GoFfi with NtAcc/TnAcc, must produce the
+  // same gradients up to the kernel's known reordered-sum/FMA drift. Odd shapes on purpose (M % 8,
+  // K % 4) so the remainder paths are the ones wired in.
+  const Ffi = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "GoFfi", Precision: "F64" } }, UseCli: false, UseEnv: false }));
+  if (Ffi.FellBack) return; // no DLL on this machine (e.g. CI) — nothing to check
+
+  const Rng = new SeededRng(12);
+  const A = RandTensor(13, 7, Rng);
+  const B = RandTensor(7, 9, Rng);
+  const UpstreamGrad = new Float64Array(13 * 9);
+  for (let I = 0; I < UpstreamGrad.length; I++) UpstreamGrad[I] = Rng.NextGaussian();
+
+  SetActiveBackend(null);
+  const InlineOut = MatMul(A, B);
+  InlineOut.Grad.set(UpstreamGrad);
+  InlineOut.BackwardFn?.();
+  const InlineDA = Float64Array.from(A.Grad);
+  const InlineDB = Float64Array.from(B.Grad);
+
+  A.Grad.fill(0);
+  B.Grad.fill(0);
+  ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "GoFfi", Precision: "F64" } }, UseCli: false, UseEnv: false }));
+  const RoutedOut = MatMul(A, B);
+  RoutedOut.Grad.set(UpstreamGrad);
+  RoutedOut.BackwardFn?.();
+  for (let I = 0; I < A.Size; I++) {
+    expect(Math.abs(A.Grad[I] - InlineDA[I]) / (Math.abs(InlineDA[I]) + 1e-9)).toBeLessThan(1e-10);
+  }
+  for (let I = 0; I < B.Size; I++) {
+    expect(Math.abs(B.Grad[I] - InlineDB[I]) / (Math.abs(InlineDB[I]) + 1e-9)).toBeLessThan(1e-10);
+  }
+});
+
 test("switching away from the Go FFI backend leaves an already-captured backend callable", () => {
   // Ops/MatMul stores the ACTIVE backend in every tape node's backward closure, so a node built while
   // GoFfi was active still calls into the DLL after a switch (Backward runs later). The selector used

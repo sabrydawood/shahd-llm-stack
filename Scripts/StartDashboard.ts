@@ -427,6 +427,7 @@ const Train: TrainFn = async (Settings, OnEvent, Signal) => {
     `--Name=${Settings.Name}`, `--Steps=${Settings.Steps}`, `--Merges=${Settings.Merges}`,
     `--EmbedDim=${Settings.EmbedDim}`, `--Layers=${Settings.NumLayers}`, `--Heads=${Settings.NumHeads}`,
     `--Block=${Settings.BlockSize}`, `--Batch=${Settings.BatchSize}`, `--Workers=${Settings.Workers ?? 0}`,
+    `--Precision=${Settings.Precision ?? "F64"}`,
     ...(Settings.Resume ? ["--Resume"] : []), // continue/EXTEND an existing checkpoint of this name
   ];
   const Args = Settings.Kind === "chat"

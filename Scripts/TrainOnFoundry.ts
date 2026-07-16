@@ -56,6 +56,9 @@ const Workers = Number(ReadArg("--Workers=", "0")); // sequence-parallel worker 
 const Steps = Number(ReadArg("--Steps=", "2000"));
 const SavePath = ReadArg("--Save=", "Checkpoints/Foundry.ckpt");
 const Measure = ReadFlag("--Measure");
+// Storage precision: F32 halves tape/weight memory and feeds the 8-lane f32 kernels. Resumed runs
+// inherit the CHECKPOINT's precision below (changing width mid-run would reinterpret the weights).
+const Precision = ReadArg("--Precision=", "F64") === "F32" ? "F32" as const : "F64" as const;
 
 // Build the pretraining corpus from the SEPARATED kind tables, each up to its own byte budget: code
 // (--CodeMb, default = --CorpusMb for back-compat) + optional general knowledge (--KnowledgeMb). This
@@ -159,6 +162,7 @@ const Config = LoadConfig({
     Training: { BatchSize: Inherited !== null ? Inherited.Training.BatchSize : BatchSize, Workers, EvalInterval, EvalIterations: 10, CheckpointInterval: EffectiveSteps },
     Schedule: Inherited !== null ? { ...Inherited.Schedule, MaxSteps: EffectiveSteps } : { Kind: "Cosine", WarmupSteps, MaxSteps: EffectiveSteps, MinLrRatio: 0.1 },
     Optimizer: Inherited !== null ? { ...Inherited.Optimizer } : { Kind: "AdamW", LearningRate: 0.003 },
+    Compute: Inherited !== null ? { ...Inherited.Compute } : { Precision },
   },
   UseCli: false,
   UseEnv: false,

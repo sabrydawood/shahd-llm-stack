@@ -47,6 +47,9 @@ const Lr = Number(ReadArg("--Lr=", "0.002"));
 const ResumeFlag = ReadFlag("--Resume"); // explicit "train it more" — extend an existing chat model
 const Fresh = ReadFlag("--Fresh"); // explicit overwrite of a same-name model (bypasses the guard below)
 const From = ReadArg("--From=", ""); // warm-start a NEW chat run from a pretrained BASE checkpoint's weights
+// Storage precision (see TrainOnFoundry): inherited from the checkpoint on resume and from the
+// BASE on --From (its weights are stored in that width's distribution).
+const Precision = ReadArg("--Precision=", "F64") === "F32" ? "F32" as const : "F64" as const;
 
 // 1) SFT data from the SEPARATED kind tables, each capped independently: code (for the owned
 // language-ID task) from documents_code, real dialogue from documents_conversation. Knowledge
@@ -196,6 +199,7 @@ const Config = LoadConfig({
     Training: { BatchSize: Inherited !== null ? Inherited.Training.BatchSize : BatchSize, Workers },
     Schedule: Inherited !== null ? { ...Inherited.Schedule, MaxSteps: Steps } : { Kind: "Cosine", WarmupSteps: Warmup, MaxSteps: Steps, MinLrRatio: 0.1 },
     Optimizer: Inherited !== null ? { ...Inherited.Optimizer } : { Kind: "AdamW", LearningRate: Lr },
+    Compute: Inherited !== null ? { ...Inherited.Compute } : Warm !== null ? { ...Warm.Ckpt.Config.Compute } : { Precision },
   },
   UseCli: false,
   UseEnv: false,

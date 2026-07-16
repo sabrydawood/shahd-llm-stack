@@ -25,6 +25,6 @@ test("RandN is reproducible with the same seed and scaled", () => {
   const A = RandN(4, 4, 0.02, new SeededRng(1));
   const B = RandN(4, 4, 0.02, new SeededRng(1));
   expect(Array.from(A.Data)).toEqual(Array.from(B.Data));
-  const Mean = A.Data.reduce((Sum, X) => Sum + X, 0) / A.Size;
+  const Mean = Array.from(A.Data).reduce((Sum, X) => Sum + X, 0) / A.Size;
   expect(Math.abs(Mean)).toBeLessThan(0.05);
 });

@@ -7,7 +7,7 @@
 
 import type { ResolvedConfig } from "../Config/ConfigTypes.ts";
 import type { ComputeBackend } from "./ComputeBackend.ts";
-import { TsBackendF32 } from "./TsBackendF32.ts";
+import { SetTensorPrecision } from "../Tensor/Tensor.ts";
 import { GoFfiBackend } from "./GoFfiBackend.ts";
 
 let Active: ComputeBackend | null = null; // null => Ops/MatMul uses its inline f64 fast path
@@ -38,32 +38,35 @@ function TryGoFfi(): GoFfiBackend | null {
   }
 }
 
-function CpuFor(Precision: "F64" | "F32"): ComputeBackend | null {
-  return Precision === "F32" ? new TsBackendF32() : null; // null = inline f64
-}
-
-/** Resolve Config.Compute to an active backend, with probe + CPU fallback. Returns what was chosen. */
+/** Resolve Config.Compute to an active backend, with probe + CPU fallback. Returns what was chosen.
+ *  Also sets the TENSOR STORAGE precision (SetTensorPrecision) — F32 is real storage now, not a
+ *  per-call conversion backend: tensors allocate Float32Array and the inline op loops work on them
+ *  unchanged (JS math is f64 and rounds on store), while GoFfi dispatches to the f32 C kernels. */
 export function ActivateFromConfig(Config: ResolvedConfig): BackendChoice {
   const C = Config.Compute;
+  SetTensorPrecision(C.Precision);
 
   if (C.Backend === "Ts") {
-    SetActiveBackend(CpuFor(C.Precision));
-    return { Chosen: C.Precision === "F32" ? "Ts/F32" : "Ts/F64 (inline)", FellBack: false };
+    SetActiveBackend(null); // the inline loops are precision-agnostic over the stored dtype
+    return { Chosen: `Ts/${C.Precision} (inline)`, FellBack: false };
   }
 
   if (C.Backend === "GoFfi") {
-    const Ffi = C.Precision === "F64" ? TryGoFfi() : null; // Go f32 kernel not built yet
-    if (Ffi !== null) {
+    const Ffi = TryGoFfi();
+    // An F32 run needs the f32 kernel trio; an older DLL without it must fall back rather than
+    // feed Float32Array buffers to a kernel reading doubles.
+    const Usable = Ffi !== null && (C.Precision === "F64" || Ffi.HasF32);
+    if (Ffi !== null && Usable) {
       SetActiveBackend(Ffi); // GoFfiBackend reuses one cached DLL handle, so re-activating never reloads
-      return { Chosen: "GoFfi/F64", FellBack: false };
+      return { Chosen: `GoFfi/${C.Precision}`, FellBack: false };
     }
     if (!C.FallbackToCpu) throw new Error("GoFfi backend unavailable and Compute.FallbackToCpu is false");
-    SetActiveBackend(CpuFor(C.Precision));
+    SetActiveBackend(null);
     return { Chosen: `CPU fallback (${C.Precision})`, FellBack: true };
   }
 
   // "Gpu" — reserved for M5; not built yet.
   if (!C.FallbackToCpu) throw new Error("GPU backend not built and Compute.FallbackToCpu is false");
-  SetActiveBackend(CpuFor(C.Precision));
+  SetActiveBackend(null);
   return { Chosen: `CPU fallback (${C.Precision})`, FellBack: true };
 }

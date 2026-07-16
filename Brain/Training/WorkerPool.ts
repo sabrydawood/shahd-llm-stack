@@ -37,6 +37,7 @@ import type { ResolvedConfig } from "../Config/ConfigTypes.ts";
 import type { DataLoader } from "../Data/DataLoader.ts";
 import type { Shahd } from "../Nn/Shahd.ts";
 import type { Tensor } from "../Tensor/Tensor.ts";
+import { TensorArrayCtor, NumView } from "../Tensor/Tensor.ts";
 import type { TrainingSequence } from "../Sft/ChatTemplate.ts";
 import { GetActiveBackend } from "../ComputeBackend/BackendSelector.ts";
 import { GoFfiBackend } from "../ComputeBackend/GoFfiBackend.ts";
@@ -81,18 +82,22 @@ export type WorkerInit = {
 };
 
 /** Re-point a model's parameter Data (and optionally Grad) into flat shared memory, preserving
- *  values when asked. Layout = Parameters() order, which both sides build from the same Config. */
+ *  values when asked. Layout = Parameters() order, which both sides build from the same Config.
+ *  The element width follows the run's storage precision (main thread and workers both activate
+ *  from the SAME Config before aliasing, so the two sides always view the buffers identically —
+ *  an F32 run shares Float32 slabs, halving pool memory and feeding the f32 kernels directly). */
 export function AliasParams(Params: Tensor[], Weights: SharedArrayBuffer, Grads: SharedArrayBuffer | null, CopyValues: boolean): void {
+  const Bytes = TensorArrayCtor().BYTES_PER_ELEMENT;
   let Offset = 0;
   for (const P of Params) {
-    const View = new Float64Array(Weights, Offset * 8, P.Size);
-    if (CopyValues) View.set(P.Data);
+    const View = NumView(Weights, Offset * Bytes, P.Size);
+    if (CopyValues) View.set(P.Data as Float64Array); // set() converts across widths; the cast picks one union arm
     P.Data = View;
-    if (Grads !== null) P.Grad = new Float64Array(Grads, Offset * 8, P.Size);
+    if (Grads !== null) P.Grad = NumView(Grads, Offset * Bytes, P.Size);
     Offset += P.Size;
   }
-  if (Offset * 8 !== Weights.byteLength) {
-    throw new Error(`WorkerPool: param layout mismatch — ${Offset * 8} bytes of params vs ${Weights.byteLength} shared`);
+  if (Offset * Bytes !== Weights.byteLength) {
+    throw new Error(`WorkerPool: param layout mismatch — ${Offset * Bytes} bytes of params vs ${Weights.byteLength} shared`);
   }
 }
 
@@ -261,14 +266,15 @@ export async function CreateTrainWorkerPool(Model: Shahd, Config: ResolvedConfig
   const Params = Model.Parameters();
   let Total = 0;
   for (const P of Params) Total += P.Size;
-  const Weights = new SharedArrayBuffer(Total * 8);
-  const MainGrad = new SharedArrayBuffer(Total * 8);
+  const SlabBytes = Total * TensorArrayCtor().BYTES_PER_ELEMENT; // width follows the run's precision
+  const Weights = new SharedArrayBuffer(SlabBytes);
+  const MainGrad = new SharedArrayBuffer(SlabBytes);
   // The main model's grads alias MainGrad so the workers' reduce phase can write them directly;
   // the reduce ASSIGNS every element (ranges cover the whole space), so no zeroing is ever needed.
   AliasParams(Params, Weights, MainGrad, true);
 
   const GradSlabs: SharedArrayBuffer[] = [];
-  for (let Wi = 0; Wi < W; Wi++) GradSlabs.push(new SharedArrayBuffer(Total * 8));
+  for (let Wi = 0; Wi < W; Wi++) GradSlabs.push(new SharedArrayBuffer(SlabBytes));
 
   const MaxSeqs = Math.ceil(BatchSize / W);
   // SFT sequences carry one extra token (inputs = Ids[:-1], targets = Ids[1:] happen inside the

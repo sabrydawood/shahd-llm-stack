@@ -35,6 +35,7 @@
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import type { Pointer } from "bun:ffi";
 import type { ComputeBackend } from "./ComputeBackend.ts";
+import type { NumArray, NumArrayCtor } from "../Tensor/Tensor.ts";
 
 type MatMulSymbol = (a: Pointer, b: Pointer, out: Pointer, m: number, k: number, n: number) => void;
 type MatMulAccSymbol = (a: Pointer, b: Pointer, out: Pointer, m: number, k: number, n: number, acc: number) => void;
@@ -43,6 +44,11 @@ type KernelSymbols = {
   MatMul: MatMulSymbol;
   Nt: MatMulAccSymbol | null;
   Tn: MatMulAccSymbol | null;
+  // The f32 trio (8 SIMD lanes instead of 4). Null on DLLs built before the f32 kernels existed;
+  // BackendSelector treats a null here as "GoFfi cannot serve an F32 run" and falls back to CPU.
+  MatMul32: MatMulSymbol | null;
+  Nt32: MatMulAccSymbol | null;
+  Tn32: MatMulAccSymbol | null;
   Threads: ThreadsSymbol | null;
 };
 
@@ -69,25 +75,50 @@ function LoadKernelSymbols(LibPath: string): KernelSymbols {
       MatMulF64: MatMulDef,
       MatMulNTF64: MatMulAccDef,
       MatMulTNF64: MatMulAccDef,
+      MatMulF32: MatMulDef,
+      MatMulNTF32: MatMulAccDef,
+      MatMulTNF32: MatMulAccDef,
       SetKernelThreads: ThreadsDef,
     });
     Symbols = {
       MatMul: Lib.symbols.MatMulF64 as unknown as MatMulSymbol,
       Nt: Lib.symbols.MatMulNTF64 as unknown as MatMulAccSymbol,
       Tn: Lib.symbols.MatMulTNF64 as unknown as MatMulAccSymbol,
+      MatMul32: Lib.symbols.MatMulF32 as unknown as MatMulSymbol,
+      Nt32: Lib.symbols.MatMulNTF32 as unknown as MatMulAccSymbol,
+      Tn32: Lib.symbols.MatMulTNF32 as unknown as MatMulAccSymbol,
       Threads: Lib.symbols.SetKernelThreads as unknown as ThreadsSymbol,
     };
   } catch {
-    // Older DLL without the backward entry points (or the throw is "no such file" — then this
-    // second dlopen throws too, which is the constructor's absent-DLL signal for TryGoFfi).
-    const Lib = dlopen(LibPath, { MatMulF64: MatMulDef });
-    Symbols = { MatMul: Lib.symbols.MatMulF64 as unknown as MatMulSymbol, Nt: null, Tn: null, Threads: null };
+    try {
+      // DLL predating the f32 kernels — full f64 set only.
+      const Lib = dlopen(LibPath, {
+        MatMulF64: MatMulDef,
+        MatMulNTF64: MatMulAccDef,
+        MatMulTNF64: MatMulAccDef,
+        SetKernelThreads: ThreadsDef,
+      });
+      Symbols = {
+        MatMul: Lib.symbols.MatMulF64 as unknown as MatMulSymbol,
+        Nt: Lib.symbols.MatMulNTF64 as unknown as MatMulAccSymbol,
+        Tn: Lib.symbols.MatMulTNF64 as unknown as MatMulAccSymbol,
+        MatMul32: null,
+        Nt32: null,
+        Tn32: null,
+        Threads: Lib.symbols.SetKernelThreads as unknown as ThreadsSymbol,
+      };
+    } catch {
+      // Oldest DLL without the backward entry points (or the throw is "no such file" — then this
+      // dlopen throws too, which is the constructor's absent-DLL signal for TryGoFfi).
+      const Lib = dlopen(LibPath, { MatMulF64: MatMulDef });
+      Symbols = { MatMul: Lib.symbols.MatMulF64 as unknown as MatMulSymbol, Nt: null, Tn: null, MatMul32: null, Nt32: null, Tn32: null, Threads: null };
+    }
   }
   LoadedLibs.set(LibPath, Symbols);
   return Symbols;
 }
 
-function BufPtr(Buf: Float64Array): Pointer {
+function BufPtr(Buf: NumArray): Pointer {
   const P = ptr(Buf);
   if (P === null) throw new Error("GoFfiBackend: null buffer pointer");
   return P;
@@ -96,10 +127,13 @@ function BufPtr(Buf: Float64Array): Pointer {
 export class GoFfiBackend implements ComputeBackend {
   private Symbols: KernelSymbols;
 
+  /** True when the DLL exports the f32 kernel trio — BackendSelector requires this for F32 runs. */
+  readonly HasF32: boolean;
+
   // Optional ComputeBackend capabilities — only assigned when the DLL exports the new symbols, so
   // `Backend.MatMulNtAcc === undefined` remains an honest feature probe for Ops/MatMul.
-  MatMulNtAcc?: (A: Float64Array, Bt: Float64Array, Out: Float64Array, M: number, K: number, N: number) => void;
-  MatMulTnAcc?: (A: Float64Array, DOut: Float64Array, Db: Float64Array, M: number, K: number, N: number) => void;
+  MatMulNtAcc?: (A: NumArray, Bt: NumArray, Out: NumArray, M: number, K: number, N: number) => void;
+  MatMulTnAcc?: (A: NumArray, DOut: NumArray, Db: NumArray, M: number, K: number, N: number) => void;
 
   /** PROCESS-GLOBAL cap on per-call goroutine fan-out (one Go runtime serves every JS thread).
    *  The training worker pool sets 1 around its dispatch — its JS workers ARE the parallelism —
@@ -108,25 +142,38 @@ export class GoFfiBackend implements ComputeBackend {
 
   constructor(LibPath = "GoKernels/matmul.dll") {
     this.Symbols = LoadKernelSymbols(LibPath); // throws when the DLL is absent — TryGoFfi probes with this
-    const { Nt, Tn, Threads } = this.Symbols;
+    const { Nt, Tn, Nt32, Tn32, Threads } = this.Symbols;
+    this.HasF32 = this.Symbols.MatMul32 !== null;
     if (Nt !== null) {
-      this.MatMulNtAcc = (A, Bt, Out, M, K, N) => Nt(BufPtr(A), BufPtr(Bt), BufPtr(Out), M, K, N, 1);
+      // Dispatch by element type per call: every buffer of one call shares one width (the run's
+      // precision), so probing the FIRST operand is sufficient and costs one instanceof.
+      this.MatMulNtAcc = (A, Bt, Out, M, K, N) => {
+        const Fn = A instanceof Float32Array ? Nt32 : Nt;
+        if (Fn === null) throw new Error("GoFfiBackend: DLL lacks the f32 NT kernel — rebuild GoKernels");
+        Fn(BufPtr(A), BufPtr(Bt), BufPtr(Out), M, K, N, 1);
+      };
     }
     if (Tn !== null) {
-      this.MatMulTnAcc = (A, DOut, Db, M, K, N) => Tn(BufPtr(A), BufPtr(DOut), BufPtr(Db), M, K, N, 1);
+      this.MatMulTnAcc = (A, DOut, Db, M, K, N) => {
+        const Fn = A instanceof Float32Array ? Tn32 : Tn;
+        if (Fn === null) throw new Error("GoFfiBackend: DLL lacks the f32 TN kernel — rebuild GoKernels");
+        Fn(BufPtr(A), BufPtr(DOut), BufPtr(Db), M, K, N, 1);
+      };
     }
     if (Threads !== null) {
       this.SetKernelThreads = (N) => Threads(N);
     }
   }
 
-  MatMul(A: Float64Array, B: Float64Array, M: number, K: number, N: number): Float64Array {
-    const Out = new Float64Array(M * N);
+  MatMul(A: NumArray, B: NumArray, M: number, K: number, N: number): NumArray {
+    const Out = new (A.constructor as NumArrayCtor)(M * N);
     this.MatMulInto(A, B, Out, M, K, N);
     return Out;
   }
 
-  MatMulInto(A: Float64Array, B: Float64Array, Out: Float64Array, M: number, K: number, N: number): void {
-    this.Symbols.MatMul(BufPtr(A), BufPtr(B), BufPtr(Out), M, K, N); // kernel fully overwrites Out
+  MatMulInto(A: NumArray, B: NumArray, Out: NumArray, M: number, K: number, N: number): void {
+    const Fn = A instanceof Float32Array ? this.Symbols.MatMul32 : this.Symbols.MatMul;
+    if (Fn === null) throw new Error("GoFfiBackend: DLL lacks the f32 forward kernel — rebuild GoKernels");
+    Fn(BufPtr(A), BufPtr(B), BufPtr(Out), M, K, N); // kernel fully overwrites Out
   }
 }

@@ -18,6 +18,7 @@ import type { WorkerInit } from "./WorkerPool.ts";
 import { CmdSlot, StatusSlot, SeqCountSlot, CmdCompute, CmdShutdown, CmdReduce, StatusDone, StatusError, LossOutSlot, InvScaleSlot, AliasParams } from "./WorkerPool.ts";
 import { CreateRngStreams } from "../Random/SeededRng.ts";
 import { Shahd } from "../Nn/Shahd.ts";
+import { NumView } from "../Tensor/Tensor.ts";
 import { ForwardBackward } from "./TrainingStep.ts";
 import { SftForwardBackward } from "../Sft/SftStep.ts";
 import { ActivateFromConfig } from "../ComputeBackend/BackendSelector.ts";
@@ -38,9 +39,11 @@ function RunLoop(Init: WorkerInit): void {
   AliasParams(Model.Parameters(), Init.Weights, Init.GradSlabs[Init.MyIndex], false);
 
   const Ctl = new Int32Array(Init.Ctl);
-  const MyGrads = new Float64Array(Init.GradSlabs[Init.MyIndex]);
-  const AllSlabs = Init.GradSlabs.map((Slab) => new Float64Array(Slab));
-  const MainGrad = new Float64Array(Init.MainGrad);
+  // Slab views share the run's storage precision (ActivateFromConfig above set it from the SAME
+  // Config the main thread used, so both sides view the shared buffers identically).
+  const MyGrads = NumView(Init.GradSlabs[Init.MyIndex]);
+  const AllSlabs = Init.GradSlabs.map((Slab) => NumView(Slab));
+  const MainGrad = NumView(Init.MainGrad);
   const Ids = new Int32Array(Init.Ids);
   const Second = new Int32Array(Init.Second);
   const Lens = new Int32Array(Init.Lens);

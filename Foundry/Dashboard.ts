@@ -82,6 +82,7 @@ function ParseTrainSettings(Body: Record<string, unknown>): TrainSettings {
     // it, and TrainFn's ?? fallback quietly ran a 4-hour sequential pretrain. Default 8: dashboard
     // training should be fast even for an older cached client that doesn't send the field.
     Workers: ToNum(Body["Workers"], 8),
+    Precision: Body["Precision"] === "F32" ? "F32" : "F64",
     // Chat warm start: SafeName never returns "" (it falls back to "foundry"), so gate on the RAW
     // value — an absent/empty From must stay undefined, not become a phantom base named "foundry".
     From: typeof Body["From"] === "string" && Body["From"].trim() !== "" ? SafeName(Body["From"]) : undefined,

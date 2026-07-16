@@ -6,11 +6,12 @@
 // tape always stays here in TypeScript; only the numeric matmul bodies are delegated.
 
 import { Tensor } from "../Tensor/Tensor.ts";
+import type { NumArray, NumArrayCtor } from "../Tensor/Tensor.ts";
 import { Tape } from "../Tensor/Tape.ts";
 import { GetActiveBackend } from "../ComputeBackend/BackendSelector.ts";
 
-function Transpose(Data: Float64Array, Rows: number, Cols: number): Float64Array {
-  const Out = new Float64Array(Rows * Cols);
+function Transpose(Data: NumArray, Rows: number, Cols: number): NumArray {
+  const Out = new (Data.constructor as NumArrayCtor)(Rows * Cols);
   for (let R = 0; R < Rows; R++) {
     for (let C = 0; C < Cols; C++) Out[C * Rows + R] = Data[R * Cols + C];
   }

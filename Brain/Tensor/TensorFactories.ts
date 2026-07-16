@@ -2,6 +2,7 @@
 // every weight's randomness source is visible at the call site and reproducible.
 
 import { Tensor } from "./Tensor.ts";
+import type { NumArray } from "./Tensor.ts";
 import type { SeededRng } from "../Random/SeededRng.ts";
 
 export function Zeros(Rows: number, Cols: number): Tensor {
@@ -29,7 +30,7 @@ export function RandN(Rows: number, Cols: number, Scale: number, Rng: SeededRng)
 }
 
 /** Wrap an existing flat buffer (row-major) as a tensor. The buffer is used as-is (not copied). */
-export function FromArray(Rows: number, Cols: number, Data: Float64Array): Tensor {
+export function FromArray(Rows: number, Cols: number, Data: NumArray): Tensor {
   if (Data.length !== Rows * Cols) {
     throw new Error(`FromArray: buffer length ${Data.length} != ${Rows}*${Cols}`);
   }

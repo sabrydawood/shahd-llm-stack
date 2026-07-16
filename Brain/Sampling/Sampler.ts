@@ -4,6 +4,7 @@
 // MECHANISMS — output quality depends on what training put in the weights (CAPABILITIES.md).
 
 import type { SeededRng } from "../Random/SeededRng.ts";
+import type { NumArray } from "../Tensor/Tensor.ts";
 import type { SamplingOptions } from "./Distribution.ts";
 import { ArgmaxOf, ProbsFromLogits, SampleFromDistribution } from "./Distribution.ts";
 
@@ -13,7 +14,7 @@ export const DefaultSampling: SamplingOptions = { Temperature: 1, TopK: 0, TopP:
 
 /** Pick a next-token id from Logits[Offset .. Offset+VocabSize) using the given options + RNG. */
 export function SampleFromLogits(
-  Logits: Float64Array,
+  Logits: NumArray,
   Offset: number,
   VocabSize: number,
   Options: SamplingOptions,

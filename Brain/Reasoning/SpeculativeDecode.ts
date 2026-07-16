@@ -10,6 +10,7 @@
 // within the window, where the equality is guaranteed.
 
 import type { Shahd } from "../Nn/Shahd.ts";
+import type { NumArray } from "../Tensor/Tensor.ts";
 import { WithTapeOff } from "../Tensor/Tape.ts";
 import { SampleFromLogits } from "../Sampling/Sampler.ts";
 import { SeededRng } from "../Random/SeededRng.ts";
@@ -24,7 +25,7 @@ export type SpeculativeResult = {
 const Greedy = { Temperature: 0, TopK: 0, TopP: 1 };
 
 // Argmax of a logits row (reuses the greedy branch of SampleFromLogits — the RNG is never consumed).
-function ArgmaxAt(Logits: Float64Array, Row: number, Vocab: number, Rng: SeededRng): number {
+function ArgmaxAt(Logits: NumArray, Row: number, Vocab: number, Rng: SeededRng): number {
   return SampleFromLogits(Logits, Row * Vocab, Vocab, Greedy, Rng);
 }
 

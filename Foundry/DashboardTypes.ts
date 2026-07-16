@@ -50,6 +50,9 @@ export type TrainSettings = {
   BlockSize: number;
   Merges: number; // vocab = 256 + Merges
   BatchSize: number;
+  // Storage precision for the run: F32 halves memory + uses the 8-lane f32 kernels; F64 is the
+  // exact default. Resume/warm-start inherit the checkpoint's precision server-side regardless.
+  Precision?: "F64" | "F32";
   // Warm start (chat only): name of a pretrained BASE checkpoint whose weights seed the SFT run
   // (TrainSftChat --From). Absent/empty = SFT from random init (the old behavior).
   From?: string;

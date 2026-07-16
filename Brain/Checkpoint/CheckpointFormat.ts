@@ -42,9 +42,13 @@ export function ChecksumPayload(Params: TensorState[], Optimizer: OptimizerState
   return Hash.digest("hex");
 }
 
-/** Base64-encode a Float64Array's raw bytes. */
-export function EncodeFloat64(Arr: Float64Array): string {
-  return Buffer.from(Arr.buffer, Arr.byteOffset, Arr.byteLength).toString("base64");
+/** Base64-encode a buffer's raw bytes AS F64. An F32 run's tensors are widened (losslessly) first,
+ *  so the on-disk/in-DB format stays a single stable f64 encoding regardless of the run's storage
+ *  precision — old checkpoints load unchanged, and ApplyCheckpoint's `P.Data.set(f64)` narrows
+ *  back to f32 storage on load. */
+export function EncodeFloat64(Arr: Float64Array | Float32Array): string {
+  const F64 = Arr instanceof Float32Array ? Float64Array.from(Arr) : Arr;
+  return Buffer.from(F64.buffer, F64.byteOffset, F64.byteLength).toString("base64");
 }
 
 /** Decode base64 back into a fresh (aligned) Float64Array. */

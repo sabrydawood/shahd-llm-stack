@@ -6,6 +6,7 @@
 // it); Sampler re-exports it.
 
 import type { SeededRng } from "../Random/SeededRng.ts";
+import type { NumArray } from "../Tensor/Tensor.ts";
 
 export type SamplingOptions = {
   Temperature: number; // <= 0 => greedy argmax (honored here: a one-hot distribution at the argmax)
@@ -15,7 +16,7 @@ export type SamplingOptions = {
 
 /** Argmax of a logits row [Offset .. Offset+VocabSize) — the one greedy-selection loop shared by
  *  ProbsFromLogits' Temperature<=0 branch and Sampler.SampleFromLogits' Temperature<=0 branch. */
-export function ArgmaxOf(Logits: Float64Array, Offset: number, VocabSize: number): number {
+export function ArgmaxOf(Logits: NumArray, Offset: number, VocabSize: number): number {
   let Best = 0;
   let BestVal = -Infinity;
   for (let J = 0; J < VocabSize; J++) {
@@ -30,7 +31,7 @@ export function ArgmaxOf(Logits: Float64Array, Offset: number, VocabSize: number
 
 /** Temperature-scaled softmax with top-k then top-p, renormalized over the kept set. Temperature<=0
  *  returns a one-hot distribution at the argmax (so every consumer gets the documented greedy). */
-export function ProbsFromLogits(Logits: Float64Array, Offset: number, VocabSize: number, Options: SamplingOptions): Float64Array {
+export function ProbsFromLogits(Logits: NumArray, Offset: number, VocabSize: number, Options: SamplingOptions): Float64Array {
   if (Options.Temperature <= 0) {
     const Greedy = new Float64Array(VocabSize);
     Greedy[ArgmaxOf(Logits, Offset, VocabSize)] = 1;

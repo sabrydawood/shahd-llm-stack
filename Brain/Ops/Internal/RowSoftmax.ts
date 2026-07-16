@@ -4,11 +4,14 @@
 // gradient mechanism, so centralizing it does not violate the "keep different backward math
 // separate" rule).
 
-/** Softmax one row of `Input` (length N, starting at InputOffset) into `Output` at OutputOffset. */
+import type { NumArray } from "../../Tensor/Tensor.ts";
+
+/** Softmax one row of `Input` (length N, starting at InputOffset) into `Output` at OutputOffset.
+ *  Both buffers arrive in their owner's storage precision; the exp/sum math itself runs in f64. */
 export function ComputeRowSoftmax(
-  Input: Float64Array,
+  Input: NumArray,
   InputOffset: number,
-  Output: Float64Array,
+  Output: NumArray,
   OutputOffset: number,
   N: number,
 ): void {

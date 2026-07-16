@@ -96,7 +96,10 @@ test("ActivateFromConfig honors the config and falls back to CPU when a backend 
 
   const F32 = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "Ts", Precision: "F32" } }, UseCli: false, UseEnv: false }));
   expect(F32.Chosen).toContain("F32");
-  expect(GetActiveBackend()).not.toBe(null);
+  // F32 is real STORAGE now (SetTensorPrecision), not a per-call conversion backend: the inline
+  // loops are precision-agnostic, so Ts/F32 also runs inline. (The Gpu activation below restores
+  // the F64 default for the rest of the suite.)
+  expect(GetActiveBackend()).toBe(null);
 
   // GPU is not built; with FallbackToCpu it must not throw and must drop to CPU.
   const Gpu = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "Gpu", FallbackToCpu: true } }, UseCli: false, UseEnv: false }));

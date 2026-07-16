@@ -5,12 +5,15 @@
 
 import type { Shahd } from "../Nn/Shahd.ts";
 import type { SeededRng } from "../Random/SeededRng.ts";
+import type { NumArray } from "../Tensor/Tensor.ts";
 import type { SamplingOptions } from "./Sampler.ts";
 import { KvCache } from "./KvCache.ts";
 import { SampleFromLogits } from "./Sampler.ts";
 import { WithTapeOff } from "../Tensor/Tape.ts";
 
-function MatMulRow(X: Float64Array, W: Float64Array, K: number, N: number): Float64Array {
+// Weight buffers arrive in the run's storage precision (NumArray); the row scratch and outputs
+// stay f64 — inference math in doubles is free accuracy.
+function MatMulRow(X: Float64Array, W: NumArray, K: number, N: number): Float64Array {
   const Out = new Float64Array(N);
   for (let Kk = 0; Kk < K; Kk++) {
     const Xk = X[Kk];
@@ -21,7 +24,7 @@ function MatMulRow(X: Float64Array, W: Float64Array, K: number, N: number): Floa
   return Out;
 }
 
-function LayerNormRow(X: Float64Array, Gamma: Float64Array, Beta: Float64Array, Eps: number, N: number): Float64Array {
+function LayerNormRow(X: Float64Array, Gamma: NumArray, Beta: NumArray, Eps: number, N: number): Float64Array {
   let Mu = 0;
   for (let J = 0; J < N; J++) Mu += X[J];
   Mu /= N;

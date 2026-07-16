@@ -11,23 +11,21 @@ import { TsBackendF32 } from "./TsBackendF32.ts";
 import { GoFfiBackend } from "./GoFfiBackend.ts";
 
 let Active: ComputeBackend | null = null; // null => Ops/MatMul uses its inline f64 fast path
-let ActiveFfi: GoFfiBackend | null = null; // tracked so we can Close() the DLL handle on a switch
 
 /** The backend Ops routes through, or null for the inline f64 fast path. */
 export function GetActiveBackend(): ComputeBackend | null {
   return Active;
 }
 
-/** Swap the active backend at runtime; pass null to return to the inline CPU f64 path. This is the
- *  single owner of the Go FFI DLL handle: it closes an outgoing FFI backend and tracks a new one,
- *  so the handle is managed no matter how the backend is set (config or a direct call). */
+/** Swap the active backend at runtime; pass null to return to the inline CPU f64 path. Switching only
+ *  changes what NEW ops route through — a backend switched AWAY from must stay callable, because
+ *  Ops/MatMul captures the active backend in the backward closure of every tape node built while it
+ *  was active, and those closures run later (during Backward). This used to Close() the outgoing Go
+ *  FFI handle, which unloaded the DLL out from under exactly those closures and segfaulted the whole
+ *  process. GoFfiBackend now holds one cached, process-lifetime handle per path, so a switch has
+ *  nothing to free and nothing to leak. */
 export function SetActiveBackend(Backend: ComputeBackend | null): void {
-  if (ActiveFfi !== null && Backend !== ActiveFfi) {
-    ActiveFfi.Close(); // close the outgoing FFI DLL handle
-    ActiveFfi = null;
-  }
   Active = Backend;
-  if (Backend instanceof GoFfiBackend) ActiveFfi = Backend;
 }
 
 export type BackendChoice = { Chosen: string; FellBack: boolean };
@@ -56,7 +54,7 @@ export function ActivateFromConfig(Config: ResolvedConfig): BackendChoice {
   if (C.Backend === "GoFfi") {
     const Ffi = C.Precision === "F64" ? TryGoFfi() : null; // Go f32 kernel not built yet
     if (Ffi !== null) {
-      SetActiveBackend(Ffi); // SetActiveBackend owns ActiveFfi tracking + closing the previous handle
+      SetActiveBackend(Ffi); // GoFfiBackend reuses one cached DLL handle, so re-activating never reloads
       return { Chosen: "GoFfi/F64", FellBack: false };
     }
     if (!C.FallbackToCpu) throw new Error("GoFfi backend unavailable and Compute.FallbackToCpu is false");

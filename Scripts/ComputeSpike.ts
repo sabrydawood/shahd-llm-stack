@@ -52,7 +52,8 @@ try {
   const FfiStart = Bun.nanoseconds();
   for (let R = 0; R < Repeats; R++) Ffi.MatMul(A, B, Size, Size, Size);
   FfiMs = (Bun.nanoseconds() - FfiStart) / 1e6 / Repeats;
-  Ffi.Close();
+  // No Close(): the Go c-shared DLL handle is cached for the process lifetime by design (see
+  // GoFfiBackend) — unloading it is what segfaulted callers that still held a reference.
 } catch (Err) {
   console.log(`  (FFI backend unavailable: ${(Err as Error).message})`);
 }

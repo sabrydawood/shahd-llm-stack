@@ -102,3 +102,20 @@ test("ActivateFromConfig honors the config and falls back to CPU when a backend 
   const Gpu = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "Gpu", FallbackToCpu: true } }, UseCli: false, UseEnv: false }));
   expect(Gpu.FellBack).toBe(true);
 });
+
+test("switching away from the Go FFI backend leaves an already-captured backend callable", () => {
+  // Ops/MatMul stores the ACTIVE backend in every tape node's backward closure, so a node built while
+  // GoFfi was active still calls into the DLL after a switch (Backward runs later). The selector used
+  // to Close() the outgoing handle, unloading the library under those closures: the next call jumped
+  // into freed code and took the whole process down with a SIGSEGV. A segfault is not throwable, so
+  // `expect().not.toThrow()` could never catch it — reaching the assertion at all IS the proof.
+  const Ffi = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "GoFfi", Precision: "F64" } }, UseCli: false, UseEnv: false }));
+  if (Ffi.FellBack) return; // no DLL on this machine (e.g. CI) — nothing to regress
+  const Captured = GetActiveBackend();
+  if (Captured === null) throw new Error("GoFfi reported active but GetActiveBackend() is null");
+
+  SetActiveBackend(null); // the switch that used to unload the DLL
+
+  const Out = Captured.MatMul(new Float64Array([1, 2, 3, 4]), new Float64Array([1, 0, 0, 1]), 2, 2, 2);
+  expect(Array.from(Out)).toEqual([1, 2, 3, 4]); // identity multiply still correct after the switch
+});

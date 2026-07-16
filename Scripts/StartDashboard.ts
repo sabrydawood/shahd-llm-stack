@@ -421,12 +421,12 @@ const Train: TrainFn = async (Settings, OnEvent, Signal) => {
   const Common = [
     `--Name=${Settings.Name}`, `--Steps=${Settings.Steps}`, `--Merges=${Settings.Merges}`,
     `--EmbedDim=${Settings.EmbedDim}`, `--Layers=${Settings.NumLayers}`, `--Heads=${Settings.NumHeads}`,
-    `--Block=${Settings.BlockSize}`, `--Batch=${Settings.BatchSize}`,
+    `--Block=${Settings.BlockSize}`, `--Batch=${Settings.BatchSize}`, `--Workers=${Settings.Workers ?? 0}`,
     ...(Settings.Resume ? ["--Resume"] : []), // continue/EXTEND an existing checkpoint of this name
   ];
   const Args = Settings.Kind === "chat"
     ? ["bun", "run", "Scripts/TrainSftChat.ts", ...Common, `--CodeSamples=${Settings.CodeSamples}`, `--ConvCount=${Settings.ConvCount}`]
-    : ["bun", "run", "Scripts/TrainOnFoundry.ts", ...Common, `--CorpusMb=${Settings.CorpusMb}`, `--KnowledgeMb=${Settings.KnowledgeMb}`, `--Workers=${Settings.Workers ?? 0}`];
+    : ["bun", "run", "Scripts/TrainOnFoundry.ts", ...Common, `--CorpusMb=${Settings.CorpusMb}`, `--KnowledgeMb=${Settings.KnowledgeMb}`];
   console.log(`[train] ${Settings.Kind} "${Settings.Name}": ${Settings.Steps} steps`);
   const Proc = Bun.spawn(Args, { stdout: "pipe", stderr: "pipe", env: { ...process.env } });
   const OnAbort = (): void => {

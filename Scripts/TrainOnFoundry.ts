@@ -140,16 +140,22 @@ console.log(`bpe: ${Bpe.Merges.length} merges -> vocab ${Tokenizer.VocabSize}${R
 
 const WarmupSteps = Math.max(1, Math.min(40, Math.floor(EffectiveSteps / 4)));
 const EvalInterval = Measure ? EffectiveSteps + 1 : Math.max(1, Math.min(100, EffectiveSteps));
+// RESUME INHERITANCE: a resumed run continues the CHECKPOINT's training semantics — batch size,
+// optimizer, schedule shape — so a stale form/CLI value cannot change the math mid-run (a resumed
+// batch-8 run once silently continued at batch 16). Only Steps (the extension target) and the
+// operational knobs (workers, eval/checkpoint cadence) come from THIS invocation.
+const Inherited = Resume !== null ? Resume.Ckpt.Config : null;
 const Config = LoadConfig({
   Overrides: {
-    Model: { VocabSize: Tokenizer.VocabSize, EmbedDim, NumLayers, NumHeads, BlockSize, PositionScheme: "Rope", NormKind: "RmsNorm", MlpKind: "SwiGlu" },
-    Training: { BatchSize, Workers, EvalInterval, EvalIterations: 10, CheckpointInterval: EffectiveSteps },
-    Schedule: { Kind: "Cosine", WarmupSteps, MaxSteps: EffectiveSteps, MinLrRatio: 0.1 },
-    Optimizer: { Kind: "AdamW", LearningRate: 0.003 },
+    Model: Inherited !== null ? { ...Inherited.Model } : { VocabSize: Tokenizer.VocabSize, EmbedDim, NumLayers, NumHeads, BlockSize, PositionScheme: "Rope", NormKind: "RmsNorm", MlpKind: "SwiGlu" },
+    Training: { BatchSize: Inherited !== null ? Inherited.Training.BatchSize : BatchSize, Workers, EvalInterval, EvalIterations: 10, CheckpointInterval: EffectiveSteps },
+    Schedule: Inherited !== null ? { ...Inherited.Schedule, MaxSteps: EffectiveSteps } : { Kind: "Cosine", WarmupSteps, MaxSteps: EffectiveSteps, MinLrRatio: 0.1 },
+    Optimizer: Inherited !== null ? { ...Inherited.Optimizer } : { Kind: "AdamW", LearningRate: 0.003 },
   },
   UseCli: false,
   UseEnv: false,
 });
+if (Inherited !== null) console.log(`resume: inheriting training semantics from the checkpoint (batch ${Inherited.Training.BatchSize}, ${Inherited.Optimizer.Kind} lr ${Inherited.Optimizer.LearningRate})`);
 
 const ComputeChoice = ActivateFromConfig(Config);
 const Rng = CreateRngStreams(Config.Training.Seed);

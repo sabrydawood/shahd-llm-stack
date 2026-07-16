@@ -41,6 +41,7 @@ const NumLayers = Number(ReadArg("--Layers=", "4"));
 const NumHeads = Number(ReadArg("--Heads=", "4"));
 const BlockSize = Number(ReadArg("--Block=", "256"));
 const BatchSize = Number(ReadArg("--Batch=", "8"));
+const Workers = Number(ReadArg("--Workers=", "0")); // sequence-parallel worker threads; 0 = sequential
 const Lr = Number(ReadArg("--Lr=", "0.002"));
 const ResumeFlag = ReadFlag("--Resume"); // explicit "train it more" — extend an existing chat model
 const Fresh = ReadFlag("--Fresh"); // explicit overwrite of a same-name model (bypasses the guard below)
@@ -126,17 +127,21 @@ console.log(`training sequences: ${Rendered.length} fit context ${BlockSize} (${
 if (Rendered.length === 0) throw new Error("no SFT sequences fit the context — raise --Block");
 
 // 4) Model at the special-token vocab + a fine-tune-style schedule.
+// RESUME INHERITANCE — same contract as TrainOnFoundry: a resumed run keeps the checkpoint's
+// training semantics (batch/optimizer/schedule shape); only Steps and operational knobs are new.
 const Warmup = Math.max(1, Math.min(40, Math.floor(Steps / 5)));
+const Inherited = Resume !== null ? Resume.Ckpt.Config : null;
 const Config = LoadConfig({
   Overrides: {
-    Model: { VocabSize: Tokenizer.VocabSize, EmbedDim, NumLayers, NumHeads, BlockSize, PositionScheme: "Rope", NormKind: "RmsNorm", MlpKind: "SwiGlu" },
-    Training: { BatchSize },
-    Schedule: { Kind: "Cosine", WarmupSteps: Warmup, MaxSteps: Steps, MinLrRatio: 0.1 },
-    Optimizer: { Kind: "AdamW", LearningRate: Lr },
+    Model: Inherited !== null ? { ...Inherited.Model } : { VocabSize: Tokenizer.VocabSize, EmbedDim, NumLayers, NumHeads, BlockSize, PositionScheme: "Rope", NormKind: "RmsNorm", MlpKind: "SwiGlu" },
+    Training: { BatchSize: Inherited !== null ? Inherited.Training.BatchSize : BatchSize, Workers },
+    Schedule: Inherited !== null ? { ...Inherited.Schedule, MaxSteps: Steps } : { Kind: "Cosine", WarmupSteps: Warmup, MaxSteps: Steps, MinLrRatio: 0.1 },
+    Optimizer: Inherited !== null ? { ...Inherited.Optimizer } : { Kind: "AdamW", LearningRate: Lr },
   },
   UseCli: false,
   UseEnv: false,
 });
+if (Inherited !== null) console.log(`resume: inheriting training semantics from the checkpoint (batch ${Inherited.Training.BatchSize}, ${Inherited.Optimizer.Kind} lr ${Inherited.Optimizer.LearningRate})`);
 const ComputeChoice = ActivateFromConfig(Config);
 const Model = new Shahd(Config, Rng.InitRng);
 const Optimizer = CreateOptimizer(Model.Parameters(), Config);

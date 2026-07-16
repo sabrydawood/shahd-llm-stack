@@ -35,9 +35,15 @@ tiers need much more data (see §3).
 Rough equivalents by size: Small ≈ GPT-2 small (124M), Base ≈ GPT-2 medium/large, Large ≈ a small
 modern LLM.
 
-Training memory ≈ 4× the weights (weights + gradients + optimizer m/v), plus activations. The current
-compute path is Float64 (8 bytes), which **doubles** memory; large tiers require switching to Float32 /
-mixed precision (`Compute.Precision: "F32"`) and a GPU backend.
+Training memory ≈ 4× the weights (weights + gradients + optimizer m/v), plus activations. Storage
+**precision is a per-run knob** (the Train panel's `Precision` field / `--Precision`): **F64** (8 bytes)
+is the exact, gradient-checkable default; **F32** halves weight/tape/worker-pool memory and runs the
+8-lane f32 SIMD kernels (AdamW moments stay f64, and checkpoints keep one stable f64 encoding either
+way). Resumed runs always keep the checkpoint's precision. F32 is the practical choice from Micro up
+on CPU; the largest tiers additionally need a GPU backend.
+
+The Train panel also carries run-level knobs orthogonal to this table: `Workers` (sequence-parallel
+threads for pretrain AND chat/SFT), `Precision` (above), and — in Chat mode — `From base` (§2).
 
 ### Steps vs tokens
 
@@ -61,6 +67,22 @@ thinking on top. Three stages, each reading a different **data kind** (kept in s
 | **SFT (chat)** | reply in the chat format, call tools, think, then stop | **conversation** (+ code) | Train ▸ Mode **Chat / SFT** |
 | RL (optional) | prefer better answers | conversation | rejection sampling |
 
+**Warm start (the pretrain→SFT bridge).** A chat run can seed its weights from a finished base
+checkpoint instead of random init: pick it in **`From base`** (Chat mode) / pass `--From=<name>`.
+The base's tokenizer is reused verbatim and its architecture must match the chat run exactly
+(embed/layers/heads/context); precision is inherited from the base. This is what gives the chat model
+the base's language patterns underneath its chat behavior — SFT from scratch only ever learns the
+format. Pretraining reserves the chat/tool special tokens in the base vocab up front (their
+embeddings stay at init until SFT trains them), which is what makes the vocabularies identical across
+the two stages.
+
+**One prompt, thinking everywhere (the unified SFT recipe).** The owned SFT mix trains a single
+system prompt across every conversation type, and every owned assistant turn opens with a
+`<|think|>…<|endthink|>` scratchpad — so think-then-answer is the model's default behavior under the
+exact prompt serving presents, and the chat view's reasoning trace shows a trained signal rather than
+depending on a prompt variant the model never sees at inference. A tiny model keys behavior on the
+literal prompt prefix; splitting the data across near-identical prompt wordings splits its behavior.
+
 **The single most important input for "talks well" is conversation data** (OASST/OASST2 dialogue),
 used in the SFT stage. More + more diverse dialogue → better conversational behavior, up to the
 model's scale ceiling.
@@ -69,9 +91,10 @@ model's scale ceiling.
 
 SFT **keeps the base architecture** — a chat model is a base model plus an instruction stage — so the
 config columns mirror the base-family table (§1) and the dashboard Train panel (Chat mode). `SFT steps`
-and `Conversation examples` are the extra chat knobs. Note: chat adds ~12 **special tokens**
-(`<|user|>`, `<|assistant|>`, `<|tool_call|>`, `<|think|>`, …) on top of the `Vocab` shown, so the
-model's true vocab is `Vocab + ~12`.
+and `Conversation examples` are the extra chat knobs. Note on vocab: the ~17 **special tokens**
+(`<|user|>`, `<|assistant|>`, `<|tool_call|>`, `<|think|>`, EOS/FIM, …) sit on top of the `Vocab`
+shown, and since the warm-start bridge they are reserved by the PRETRAIN stage too — base and chat
+share one vocab layout, so the model's true vocab is `Vocab + specials` at both stages.
 
 | Chat tier | Embed | Layers | Heads | Context | Vocab | Batch | SFT steps | Conversation examples | Realistically expect |
 |-----------|-------|--------|-------|---------|-------|-------|-----------|-----------------------|----------------------|
@@ -163,5 +186,6 @@ Capacity (smartness)  = width (embed) × depth (layers)    → needs GPU beyond 
 Long-context cost      = KV-cache, not weights             → mitigated by GQA + quantization
 ```
 
-Practical path for this project: stay small on CPU (Seed–Micro), move to a GPU for Mini and up, and
-switch weights + training to Float32 / mixed precision before scaling past ~100M parameters.
+Practical path for this project: stay small on CPU (Seed–Micro) with **F32 storage from Micro up**
+(available today via the `Precision` knob — half the memory, 8-lane SIMD kernels), pretrain a base
+then **warm-start the chat stage from it** (`From base`), and move to a GPU for Mini and beyond.

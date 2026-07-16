@@ -3,11 +3,19 @@
 // subprocess GoBackend it IS a drop-in sync ComputeBackend. Requires GoKernels/matmul.dll (built
 // from GoKernels/ffi via `go build -buildmode=c-shared`, done in PowerShell where MinGW gcc works).
 //
-// FINDING (Phase 7, updated): a NAIVE Go port lost to Bun's JIT (~0.67x), but the OPTIMIZED kernel
-// (B-transpose for cache locality + goroutine row-parallelism, see GoKernels/ffi/matmul.go) now
-// WINS decisively and bit-exactly — measured ~2.0x at 128, ~6.7x at 256, ~7.8x at 512 (parity
-// 0.0e+0). It stays an OPT-IN accelerator, not the default: it needs the prebuilt DLL (gcc, built
-// via PowerShell), so TsBackend remains the zero-dependency fallback the hot path can always use.
+// FINDING: a naive scalar Go port LOST to Bun's JIT, and even the tuned scalar Go kernel was ~1.4-1.9x
+// slower per core than the JIT (measured at GOMAXPROCS=1) — Go's only edge was cheap goroutine fan-out,
+// because Go has no SIMD intrinsics. The kernel's inner loop is therefore C (AVX2+FMA, see
+// GoKernels/ffi/matmul_avx.c) with Go keeping the row fan-out: measured 3.0-4.9x over the old scalar
+// kernel across this model's real shapes, ~1.95x on a whole training step. It stays an OPT-IN
+// accelerator, not the default: it needs the prebuilt DLL (gcc, built via PowerShell), so TsBackend
+// remains the zero-dependency fallback the hot path can always use.
+//
+// NOT bit-identical to TsBackend any more (vectorizing the k loop keeps 4 partial sums and FMA rounds
+// once, not twice; drift is ~1e-14 relative). That was a deliberate trade for the SIMD win. The guard
+// is Tests/Compute.Test.ts, which checks this kernel against the TS reference within f64 accumulation
+// tolerance on shapes that hit its edge paths — RunGradCheck never activates a backend, so it only
+// ever exercises the inline TS path and does NOT cover this code.
 //
 // The DLL is opened ONCE per path and kept for the PROCESS LIFETIME — never unloaded. That is a
 // CORRECTNESS requirement, not an optimization: Ops/MatMul captures the active backend inside every

@@ -103,6 +103,44 @@ test("ActivateFromConfig honors the config and falls back to CPU when a backend 
   expect(Gpu.FellBack).toBe(true);
 });
 
+test("Go FFI kernel agrees with the inline TS path within f64 accumulation tolerance", () => {
+  // The Go kernel used to be BIT-identical to TS, and that property was its only correctness guard
+  // (checked by hand in Scripts/ComputeSpike.ts). It is now vectorized (AVX2/FMA: 4 partial sums, and
+  // FMA rounds once instead of twice), so bit-equality is gone by design — which leaves the kernel
+  // otherwise UNGUARDED, because RunGradCheck never activates a backend and so only ever exercises the
+  // inline TS path. This test is the replacement guard: agreement to f64 accumulation noise.
+  //
+  // The shapes deliberately hit the kernel's edge paths, which is where a blocked+vectorized kernel
+  // actually breaks: M % 8 != 0 (the one-row-at-a-time remainder loop) and K % 4 != 0 (the scalar tail
+  // after the vector body), plus both at once, plus a large aligned shape for the main path.
+  const Ffi = ActivateFromConfig(LoadConfig({ Overrides: { Compute: { Backend: "GoFfi", Precision: "F64" } }, UseCli: false, UseEnv: false }));
+  if (Ffi.FellBack) return; // no DLL on this machine (e.g. CI) — nothing to check
+  const Backend = GetActiveBackend();
+  if (Backend === null) throw new Error("GoFfi reported active but GetActiveBackend() is null");
+
+  const Rng = new SeededRng(9);
+  const Shapes: [number, number, number][] = [
+    [256, 128, 512], // main blocked path, K % 4 == 0, M % 8 == 0
+    [7, 5, 3], // both edges: M % 8 != 0 AND K % 4 != 0
+    [13, 128, 9], // M % 8 != 0 only
+    [16, 13, 5], // K % 4 != 0 only
+    [1, 1, 1], // degenerate
+  ];
+  for (const [M, K, N] of Shapes) {
+    const A = new Float64Array(M * K);
+    const B = new Float64Array(K * N);
+    for (let I = 0; I < A.length; I++) A[I] = Rng.NextGaussian();
+    for (let I = 0; I < B.length; I++) B[I] = Rng.NextGaussian();
+    const Go = Backend.MatMul(A, B, M, K, N);
+    const Ref = new TsBackend().MatMul(A, B, M, K, N);
+    let MaxRel = 0;
+    for (let I = 0; I < Ref.length; I++) {
+      MaxRel = Math.max(MaxRel, Math.abs(Ref[I] - Go[I]) / (Math.abs(Ref[I]) + 1e-9));
+    }
+    expect(MaxRel).toBeLessThan(1e-10); // reordered f64 sums drift ~1e-14; 1e-10 catches real bugs
+  }
+});
+
 test("switching away from the Go FFI backend leaves an already-captured backend callable", () => {
   // Ops/MatMul stores the ACTIVE backend in every tape node's backward closure, so a node built while
   // GoFfi was active still calls into the DLL after a switch (Backward runs later). The selector used

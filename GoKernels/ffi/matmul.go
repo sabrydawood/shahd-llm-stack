@@ -32,6 +32,8 @@ package main
 #cgo CFLAGS: -O3
 void MatMulRowsAvx(const double *A, const double *BT, double *O, int RowStart, int RowEnd, int K, int N, int Acc);
 void MatMulTnAvx(const double *A, const double *DOut, double *DB, int PStart, int PEnd, int M, int K, int N, int Acc);
+void MatMulRowsAvxF32(const float *A, const float *BT, float *O, int RowStart, int RowEnd, int K, int N, int Acc);
+void MatMulTnAvxF32(const float *A, const float *DOut, float *DB, int PStart, int PEnd, int M, int K, int N, int Acc);
 */
 import "C"
 import (
@@ -63,6 +65,14 @@ const TnFlopChunk = 262144
 var BtPool = sync.Pool{
 	New: func() any {
 		Buf := make([]float64, 0)
+		return &Buf
+	},
+}
+
+// Same scratch pool for the f32 entry points (a shared pool would mix element types).
+var BtPoolF32 = sync.Pool{
+	New: func() any {
+		Buf := make([]float32, 0)
 		return &Buf
 	},
 }
@@ -135,7 +145,7 @@ func FanOutRows(a, bt, out *C.double, M, K, N, Acc int) {
 // transposes (~65k elements) across all cores wins ~1.4-1.6x, but doing the same to the narrow
 // attention projections (~4k elements) LOSES ~30% — goroutine spawn/join costs more than the
 // transpose itself at that size. One worker per TransposeChunk elements lets each shape pick.
-func TransposeBt(BT, B []float64, K, N int) {
+func TransposeBt[T float64 | float32](BT, B []T, K, N int) {
 	Workers := KernelWorkerCap()
 	TWorkers := (N * K) / TransposeChunk
 	if TWorkers > Workers {
@@ -247,6 +257,112 @@ func MatMulTNF64(a *C.double, dout *C.double, db *C.double, m C.int, k C.int, n 
 		go func(PStart, PEnd int) {
 			defer Wg.Done()
 			C.MatMulTnAvx(a, dout, db, C.int(PStart), C.int(PEnd), C.int(M), C.int(K), C.int(N), C.int(acc))
+		}(P0, P1)
+	}
+	Wg.Wait()
+}
+
+// ── F32 entry points — the same threading shell over the f32 C kernels (see matmul_avx.c: AVX2 is
+// 8 lanes of f32 vs 4 of f64, and the narrow shapes are memory-bound, so f32 doubles FLOPs per
+// instruction AND halves bytes moved). Fan-out mirrors the f64 trio; TransposeBt is generic.
+
+// FanOutRowsF32 mirrors FanOutRows for the f32 row kernel (same RowBlock — both kernels block 8 rows).
+func FanOutRowsF32(a, bt, out *C.float, M, K, N, Acc int) {
+	Workers := KernelWorkerCap()
+	if Workers > M {
+		Workers = M
+	}
+	if Workers < 1 {
+		Workers = 1
+	}
+	RowsPer := (M + Workers - 1) / Workers
+	RowsPer = ((RowsPer + RowBlock - 1) / RowBlock) * RowBlock
+
+	if RowsPer >= M { // single range: run on the calling thread (the worker-pool fast path)
+		C.MatMulRowsAvxF32(a, bt, out, C.int(0), C.int(M), C.int(K), C.int(N), C.int(Acc))
+		return
+	}
+
+	var Wg sync.WaitGroup
+	for Start := 0; Start < M; Start += RowsPer {
+		End := Start + RowsPer
+		if End > M {
+			End = M
+		}
+		Wg.Add(1)
+		go func(RowStart, RowEnd int) {
+			defer Wg.Done()
+			C.MatMulRowsAvxF32(a, bt, out, C.int(RowStart), C.int(RowEnd), C.int(K), C.int(N), C.int(Acc))
+		}(Start, End)
+	}
+	Wg.Wait()
+}
+
+// MatMulF32 computes out[M,N] = a[M,K] @ b[K,N], row-major, in f32. out is fully overwritten.
+//
+//export MatMulF32
+func MatMulF32(a *C.float, b *C.float, out *C.float, m C.int, k C.int, n C.int) {
+	M := int(m)
+	K := int(k)
+	N := int(n)
+	B := unsafe.Slice((*float32)(unsafe.Pointer(b)), K*N)
+
+	BtRef := BtPoolF32.Get().(*[]float32)
+	if cap(*BtRef) < N*K {
+		*BtRef = make([]float32, N*K)
+	}
+	BT := (*BtRef)[:N*K]
+	TransposeBt(BT, B, K, N)
+	BtPtr := (*C.float)(unsafe.Pointer(&BT[0])) // Go memory, but C never retains it past the call
+
+	FanOutRowsF32(a, BtPtr, out, M, K, N, 0)
+	BtPoolF32.Put(BtRef) // safe: every worker has joined, so nothing still reads BT
+}
+
+// MatMulNTF32 computes out[M,N] (+)= a[M,K] @ btᵀ with bt ALREADY [N,K] row-major (dA half, f32).
+//
+//export MatMulNTF32
+func MatMulNTF32(a *C.float, bt *C.float, out *C.float, m C.int, k C.int, n C.int, acc C.int) {
+	FanOutRowsF32(a, bt, out, int(m), int(k), int(n), int(acc))
+}
+
+// MatMulTNF32 computes db[K,N] (+)= aᵀ @ dout (dB half, f32) — fan-out over db row ranges, same
+// work-scaled worker count as the f64 version.
+//
+//export MatMulTNF32
+func MatMulTNF32(a *C.float, dout *C.float, db *C.float, m C.int, k C.int, n C.int, acc C.int) {
+	M := int(m)
+	K := int(k)
+	N := int(n)
+
+	Workers := (M * K * N) / TnFlopChunk
+	Cpus := KernelWorkerCap()
+	if Workers > Cpus {
+		Workers = Cpus
+	}
+	if Workers > K {
+		Workers = K
+	}
+	if Workers < 1 {
+		Workers = 1
+	}
+	if Workers == 1 { // same single-range rule as FanOutRows
+		C.MatMulTnAvxF32(a, dout, db, C.int(0), C.int(K), C.int(M), C.int(K), C.int(N), C.int(acc))
+		return
+	}
+	PPer := (K + Workers - 1) / Workers
+	PPer = ((PPer + TnColBlock - 1) / TnColBlock) * TnColBlock
+
+	var Wg sync.WaitGroup
+	for P0 := 0; P0 < K; P0 += PPer {
+		P1 := P0 + PPer
+		if P1 > K {
+			P1 = K
+		}
+		Wg.Add(1)
+		go func(PStart, PEnd int) {
+			defer Wg.Done()
+			C.MatMulTnAvxF32(a, dout, db, C.int(PStart), C.int(PEnd), C.int(M), C.int(K), C.int(N), C.int(acc))
 		}(P0, P1)
 	}
 	Wg.Wait()

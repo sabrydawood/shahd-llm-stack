@@ -242,4 +242,206 @@ void MatMulTnAvx(const double *A, const double *DOut, double *DB,
     }
 }
 
+// ── F32 kernels: the same three levers at DOUBLE the SIMD width ──────────────────────────────────
+// AVX2 is 4 lanes of f64 but 8 lanes of f32, and the narrow shapes are memory-bound — so f32 both
+// doubles FLOPs per instruction AND halves bytes moved. Structure mirrors the f64 kernels exactly
+// (8-row register blocking / broadcast-FMA TN with adaptive column blocking); only the lane width,
+// the tail strides, and the TN blocking threshold change (8 DB rows x 512 floats = 16KB, so the
+// full 8-wide reuse stays safe up to N=512; the 4-wide fallback starts above that).
+
+// Horizontal sum of an 8-lane float vector. Fixed reduction order (halves, then pairs, then the
+// final pair) so the result is deterministic run to run.
+static inline float HSum256F(__m256 V) {
+    __m128 Lo = _mm256_castps256_ps128(V);
+    __m128 Hi = _mm256_extractf128_ps(V, 1);
+    Lo = _mm_add_ps(Lo, Hi);
+    __m128 Sh = _mm_movehl_ps(Lo, Lo);
+    Lo = _mm_add_ps(Lo, Sh);
+    Sh = _mm_shuffle_ps(Lo, Lo, 0x55);
+    return _mm_cvtss_f32(_mm_add_ss(Lo, Sh));
+}
+
+// O[i,j] = dot(A[i,:], BT[j,:]) for i in [RowStart, RowEnd), all j in [0, N) — f32, 8 floats/FMA.
+void MatMulRowsAvxF32(const float *A, const float *BT, float *O,
+                      int RowStart, int RowEnd, int K, int N, int Acc) {
+    const int Block = 8;
+    int I = RowStart;
+
+    for (; I + Block <= RowEnd; I += Block) {
+        const float *A0 = A + (size_t)(I + 0) * K;
+        const float *A1 = A + (size_t)(I + 1) * K;
+        const float *A2 = A + (size_t)(I + 2) * K;
+        const float *A3 = A + (size_t)(I + 3) * K;
+        const float *A4 = A + (size_t)(I + 4) * K;
+        const float *A5 = A + (size_t)(I + 5) * K;
+        const float *A6 = A + (size_t)(I + 6) * K;
+        const float *A7 = A + (size_t)(I + 7) * K;
+
+        for (int J = 0; J < N; J++) {
+            const float *Bt = BT + (size_t)J * K;
+            __m256 S0 = _mm256_setzero_ps(), S1 = _mm256_setzero_ps();
+            __m256 S2 = _mm256_setzero_ps(), S3 = _mm256_setzero_ps();
+            __m256 S4 = _mm256_setzero_ps(), S5 = _mm256_setzero_ps();
+            __m256 S6 = _mm256_setzero_ps(), S7 = _mm256_setzero_ps();
+
+            int P = 0;
+            for (; P + 8 <= K; P += 8) {
+                __m256 Bv = _mm256_loadu_ps(Bt + P); // loaded once, reused by all 8 rows
+                S0 = _mm256_fmadd_ps(_mm256_loadu_ps(A0 + P), Bv, S0);
+                S1 = _mm256_fmadd_ps(_mm256_loadu_ps(A1 + P), Bv, S1);
+                S2 = _mm256_fmadd_ps(_mm256_loadu_ps(A2 + P), Bv, S2);
+                S3 = _mm256_fmadd_ps(_mm256_loadu_ps(A3 + P), Bv, S3);
+                S4 = _mm256_fmadd_ps(_mm256_loadu_ps(A4 + P), Bv, S4);
+                S5 = _mm256_fmadd_ps(_mm256_loadu_ps(A5 + P), Bv, S5);
+                S6 = _mm256_fmadd_ps(_mm256_loadu_ps(A6 + P), Bv, S6);
+                S7 = _mm256_fmadd_ps(_mm256_loadu_ps(A7 + P), Bv, S7);
+            }
+
+            float R0 = HSum256F(S0), R1 = HSum256F(S1), R2 = HSum256F(S2), R3 = HSum256F(S3);
+            float R4 = HSum256F(S4), R5 = HSum256F(S5), R6 = HSum256F(S6), R7 = HSum256F(S7);
+            for (; P < K; P++) { // K % 8 tail
+                float Bv = Bt[P];
+                R0 += A0[P] * Bv; R1 += A1[P] * Bv; R2 += A2[P] * Bv; R3 += A3[P] * Bv;
+                R4 += A4[P] * Bv; R5 += A5[P] * Bv; R6 += A6[P] * Bv; R7 += A7[P] * Bv;
+            }
+
+            if (Acc) {
+                O[(size_t)(I + 0) * N + J] += R0;
+                O[(size_t)(I + 1) * N + J] += R1;
+                O[(size_t)(I + 2) * N + J] += R2;
+                O[(size_t)(I + 3) * N + J] += R3;
+                O[(size_t)(I + 4) * N + J] += R4;
+                O[(size_t)(I + 5) * N + J] += R5;
+                O[(size_t)(I + 6) * N + J] += R6;
+                O[(size_t)(I + 7) * N + J] += R7;
+            } else {
+                O[(size_t)(I + 0) * N + J] = R0;
+                O[(size_t)(I + 1) * N + J] = R1;
+                O[(size_t)(I + 2) * N + J] = R2;
+                O[(size_t)(I + 3) * N + J] = R3;
+                O[(size_t)(I + 4) * N + J] = R4;
+                O[(size_t)(I + 5) * N + J] = R5;
+                O[(size_t)(I + 6) * N + J] = R6;
+                O[(size_t)(I + 7) * N + J] = R7;
+            }
+        }
+    }
+
+    for (; I < RowEnd; I++) { // rows left over when the range is not a multiple of Block
+        const float *Ai = A + (size_t)I * K;
+        for (int J = 0; J < N; J++) {
+            const float *Bt = BT + (size_t)J * K;
+            __m256 S = _mm256_setzero_ps();
+            int P = 0;
+            for (; P + 8 <= K; P += 8) {
+                S = _mm256_fmadd_ps(_mm256_loadu_ps(Ai + P), _mm256_loadu_ps(Bt + P), S);
+            }
+            float R = HSum256F(S);
+            for (; P < K; P++) R += Ai[P] * Bt[P];
+            if (Acc) O[(size_t)I * N + J] += R;
+            else O[(size_t)I * N + J] = R;
+        }
+    }
+}
+
+// DB[p,j] (+)= sum_i A[i,p] * DOut[i,j] — the f32 TN kernel (dB half of the backward). Same
+// adaptive column blocking as the f64 version, but the L1 threshold doubles: 8 DB rows of floats
+// are half the bytes, so the 8-wide reuse holds through N=512 and the 4-wide path starts above.
+void MatMulTnAvxF32(const float *A, const float *DOut, float *DB,
+                    int PStart, int PEnd, int M, int K, int N, int Acc) {
+    int P = PStart;
+
+    if (N > 512) {
+        for (; P + 4 <= PEnd; P += 4) {
+            float *Db0 = DB + (size_t)(P + 0) * N;
+            float *Db1 = DB + (size_t)(P + 1) * N;
+            float *Db2 = DB + (size_t)(P + 2) * N;
+            float *Db3 = DB + (size_t)(P + 3) * N;
+            if (!Acc) {
+                for (int J = 0; J < N; J++) { Db0[J] = 0.0f; Db1[J] = 0.0f; Db2[J] = 0.0f; Db3[J] = 0.0f; }
+            }
+            for (int I = 0; I < M; I++) {
+                const float *Ar = A + (size_t)I * K + P;
+                const float *Dr = DOut + (size_t)I * N;
+                __m256 V0 = _mm256_set1_ps(Ar[0]), V1 = _mm256_set1_ps(Ar[1]);
+                __m256 V2 = _mm256_set1_ps(Ar[2]), V3 = _mm256_set1_ps(Ar[3]);
+                int J = 0;
+                for (; J + 8 <= N; J += 8) {
+                    __m256 Dv = _mm256_loadu_ps(Dr + J); // loaded once, reused by 4 DB rows
+                    _mm256_storeu_ps(Db0 + J, _mm256_fmadd_ps(V0, Dv, _mm256_loadu_ps(Db0 + J)));
+                    _mm256_storeu_ps(Db1 + J, _mm256_fmadd_ps(V1, Dv, _mm256_loadu_ps(Db1 + J)));
+                    _mm256_storeu_ps(Db2 + J, _mm256_fmadd_ps(V2, Dv, _mm256_loadu_ps(Db2 + J)));
+                    _mm256_storeu_ps(Db3 + J, _mm256_fmadd_ps(V3, Dv, _mm256_loadu_ps(Db3 + J)));
+                }
+                for (; J < N; J++) { // N % 8 tail
+                    float Dj = Dr[J];
+                    Db0[J] += Ar[0] * Dj; Db1[J] += Ar[1] * Dj; Db2[J] += Ar[2] * Dj; Db3[J] += Ar[3] * Dj;
+                }
+            }
+        }
+    }
+
+    for (; P + 8 <= PEnd; P += 8) {
+        float *Db0 = DB + (size_t)(P + 0) * N;
+        float *Db1 = DB + (size_t)(P + 1) * N;
+        float *Db2 = DB + (size_t)(P + 2) * N;
+        float *Db3 = DB + (size_t)(P + 3) * N;
+        float *Db4 = DB + (size_t)(P + 4) * N;
+        float *Db5 = DB + (size_t)(P + 5) * N;
+        float *Db6 = DB + (size_t)(P + 6) * N;
+        float *Db7 = DB + (size_t)(P + 7) * N;
+        if (!Acc) {
+            for (int J = 0; J < N; J++) {
+                Db0[J] = 0.0f; Db1[J] = 0.0f; Db2[J] = 0.0f; Db3[J] = 0.0f;
+                Db4[J] = 0.0f; Db5[J] = 0.0f; Db6[J] = 0.0f; Db7[J] = 0.0f;
+            }
+        }
+        for (int I = 0; I < M; I++) {
+            const float *Ar = A + (size_t)I * K + P;
+            const float *Dr = DOut + (size_t)I * N;
+            __m256 V0 = _mm256_set1_ps(Ar[0]), V1 = _mm256_set1_ps(Ar[1]);
+            __m256 V2 = _mm256_set1_ps(Ar[2]), V3 = _mm256_set1_ps(Ar[3]);
+            __m256 V4 = _mm256_set1_ps(Ar[4]), V5 = _mm256_set1_ps(Ar[5]);
+            __m256 V6 = _mm256_set1_ps(Ar[6]), V7 = _mm256_set1_ps(Ar[7]);
+            int J = 0;
+            for (; J + 8 <= N; J += 8) {
+                __m256 Dv = _mm256_loadu_ps(Dr + J); // loaded once, reused by all 8 DB rows
+                _mm256_storeu_ps(Db0 + J, _mm256_fmadd_ps(V0, Dv, _mm256_loadu_ps(Db0 + J)));
+                _mm256_storeu_ps(Db1 + J, _mm256_fmadd_ps(V1, Dv, _mm256_loadu_ps(Db1 + J)));
+                _mm256_storeu_ps(Db2 + J, _mm256_fmadd_ps(V2, Dv, _mm256_loadu_ps(Db2 + J)));
+                _mm256_storeu_ps(Db3 + J, _mm256_fmadd_ps(V3, Dv, _mm256_loadu_ps(Db3 + J)));
+                _mm256_storeu_ps(Db4 + J, _mm256_fmadd_ps(V4, Dv, _mm256_loadu_ps(Db4 + J)));
+                _mm256_storeu_ps(Db5 + J, _mm256_fmadd_ps(V5, Dv, _mm256_loadu_ps(Db5 + J)));
+                _mm256_storeu_ps(Db6 + J, _mm256_fmadd_ps(V6, Dv, _mm256_loadu_ps(Db6 + J)));
+                _mm256_storeu_ps(Db7 + J, _mm256_fmadd_ps(V7, Dv, _mm256_loadu_ps(Db7 + J)));
+            }
+            for (; J < N; J++) { // N % 8 tail
+                float Dj = Dr[J];
+                Db0[J] += Ar[0] * Dj; Db1[J] += Ar[1] * Dj; Db2[J] += Ar[2] * Dj; Db3[J] += Ar[3] * Dj;
+                Db4[J] += Ar[4] * Dj; Db5[J] += Ar[5] * Dj; Db6[J] += Ar[6] * Dj; Db7[J] += Ar[7] * Dj;
+            }
+        }
+    }
+
+    for (; P < PEnd; P++) { // columns left over when the range is not a multiple of the block
+        float *Db = DB + (size_t)P * N;
+        if (!Acc) {
+            for (int J = 0; J < N; J++) Db[J] = 0.0f;
+        }
+        for (int I = 0; I < M; I++) {
+            float Av = A[(size_t)I * K + P];
+            if (Av == 0.0f) continue;
+            const float *Dr = DOut + (size_t)I * N;
+            __m256 Vv = _mm256_set1_ps(Av);
+            int J = 0;
+            for (; J + 8 <= N; J += 8) {
+                __m256 D = _mm256_loadu_ps(Db + J);
+                D = _mm256_fmadd_ps(Vv, _mm256_loadu_ps(Dr + J), D);
+                _mm256_storeu_ps(Db + J, D);
+            }
+            for (; J < N; J++) Db[J] += Av * Dr[J];
+        }
+    }
+}
+
 #pragma GCC pop_options

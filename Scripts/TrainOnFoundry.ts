@@ -163,9 +163,13 @@ console.log(`model: ${Params.toLocaleString()} params (emb=${EmbedDim} L=${NumLa
 
 const GlobalStart = Date.now();
 const RunLogger = new Logger(null, true);
-const ProgressStride = Math.max(1, Math.floor(EffectiveSteps / 200));
-const OnStep = (Step: number, Loss: number): void => {
-  if (Step % ProgressStride === 0 && Step % EvalInterval !== 0) console.log(JSON.stringify({ Step, TrainLoss: Math.round(Loss * 1e4) / 1e4, ElapsedMs: Date.now() - GlobalStart }));
+// EVERY step is logged with its own duration (StepMs) — the per-step cost is the number being
+// tuned, and hiding 49 of every 50 steps hid exactly the variance that matters.
+let LastElapsedMs = 0;
+const OnStep = (Step: number, Loss: number, ElapsedMs: number): void => {
+  const StepMs = ElapsedMs - LastElapsedMs;
+  LastElapsedMs = ElapsedMs;
+  console.log(JSON.stringify({ Step, TrainLoss: Math.round(Loss * 1e4) / 1e4, StepMs: Math.round(StepMs), ElapsedMs }));
 };
 
 if (Measure) {

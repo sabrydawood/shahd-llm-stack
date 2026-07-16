@@ -139,7 +139,8 @@ console.log(`model: ${Params.toLocaleString()} params (emb=${EmbedDim} L=${NumLa
 // 5) SFT loop: masked forward/backward over a batch, divide accumulated grad by batch, clip, step.
 // (CkptStore was opened above for resume detection; reused here for periodic + final saves.)
 const GlobalStart = Date.now();
-const Stride = Math.max(1, Math.floor(Steps / 200));
+// Every step is logged with its own duration (StepMs) — same contract as TrainOnFoundry.
+let LastElapsedMs = 0;
 function BuildAt(Step: number): Checkpoint {
   return BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: Steps, Step, Corpus: "sft-owned", Format: "chat" }, { Kind: "Bpe", Merges: Bpe.Merges, Specials });
 }
@@ -156,7 +157,10 @@ for (let Step = StartStep; Step < Steps; Step++) {
   for (const P of Optimizer.Params) for (let I = 0; I < P.Size; I++) P.Grad[I] *= Inv;
   ClipGradGlobalNorm(Optimizer.Params, Config.Optimizer.GradClipNorm);
   Optimizer.Step(CurrentLr);
-  if (Step % Stride === 0) console.log(JSON.stringify({ Step, TrainLoss: Math.round(Loss * Inv * 1e4) / 1e4, ElapsedMs: Date.now() - GlobalStart }));
+  const ElapsedMs = Date.now() - GlobalStart;
+  const StepMs = ElapsedMs - LastElapsedMs;
+  LastElapsedMs = ElapsedMs;
+  console.log(JSON.stringify({ Step, TrainLoss: Math.round(Loss * Inv * 1e4) / 1e4, StepMs: Math.round(StepMs), ElapsedMs }));
   if (CkptStore !== null && (Step + 1) % CheckEvery === 0) {
     await CkptStore.Save(Name, BuildAt(Step + 1), new Date().toISOString());
     console.log(`checkpoint "${Name}" saved at step ${Step + 1}/${Steps}`);

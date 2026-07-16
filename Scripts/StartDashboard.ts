@@ -29,7 +29,7 @@ import { FormatTrace, BuildTrace } from "../Brain/Serving/ReasoningTrace.ts";
 import { BuildAgentTooling, RenderToolManifest } from "../Brain/Serving/Tools/ToolsBarrel.ts";
 import { ChatTokens } from "../Brain/Sft/ChatTemplate.ts";
 import { DefaultThinkingSystemPrompt, ExtractAnswer, NormalizeAnswer, MajorityVote } from "../Brain/Reasoning/ReasoningBarrel.ts";
-import { Generate } from "../Brain/Sampling/Generate.ts";
+import { GenerateAsync } from "../Brain/Sampling/Generate.ts";
 import { DefaultSampling } from "../Brain/Sampling/Sampler.ts";
 import { SeededRng } from "../Brain/Random/SeededRng.ts";
 import { ResolveFoundryStores, GitHubToken } from "./FoundryEnv.ts";
@@ -127,9 +127,27 @@ async function ServeChatAgent(Loaded: RunnableModel, Messages: ChatMessage[], Op
     // A chat model uses a SpecialTokenizer: render the prompt directly to ids (untrusted content
     // base-encoded) so a user/tool string can't smuggle a real control token. Only fall back to
     // string-encode for the unexpected non-special tokenizer case.
-    const Gen = (Session2: ChatSession): string => {
+    //
+    // ASYNC + EARLY-STOP, both load-bearing: the sync Generate here blocked the dashboard's whole
+    // event loop for MaxTokens per agent step (x MaxSteps steps, x N self-consistency runs) — the UI
+    // literally froze for the duration of every chat reply. GenerateAsync yields a macrotask per
+    // token, honors the client-disconnect ShouldStop, and the <|endofturn|> token id ends the run
+    // the moment the model closes its turn instead of always paying the full MaxTokens.
+    const EndOfTurnId = Tokenizer instanceof SpecialTokenizer ? Tokenizer.Id(ChatTokens.EndOfTurn) : null;
+    const Gen = async (Session2: ChatSession): Promise<string> => {
       const Ids = Tokenizer instanceof SpecialTokenizer ? Session2.RenderPromptIds(Tokenizer) : Tokenizer.Encode(Session2.RenderPrompt());
-      const Out = Generate(Model, Ids, Opts.MaxTokens, { ...DefaultSampling, Temperature: Opts.Temperature }, Rng);
+      let SawEndOfTurn = false;
+      const Out = await GenerateAsync(
+        Model,
+        Ids,
+        Opts.MaxTokens,
+        { ...DefaultSampling, Temperature: Opts.Temperature },
+        Rng,
+        (Id) => {
+          if (EndOfTurnId !== null && Id === EndOfTurnId) SawEndOfTurn = true;
+        },
+        () => SawEndOfTurn || Opts.ShouldStop?.() === true,
+      );
       const Text = Tokenizer.Decode(Out.slice(Ids.length));
       const End = Text.indexOf(ChatTokens.EndOfTurn);
       return End >= 0 ? Text.slice(0, End) : Text;
@@ -432,7 +450,7 @@ const Train: TrainFn = async (Settings, OnEvent, Signal) => {
   const Code = await Proc.exited;
   Signal?.removeEventListener("abort", OnAbort);
   if (Signal?.aborted === true) OnEvent({ kind: "train-error", message: "stopped by user — last saved checkpoint is kept; press Train to resume" });
-  else if (Code === 0) OnEvent({ kind: "train-done", savedTo: `postgres:${CkptName}` });
+  else if (Code === 0) OnEvent({ kind: "train-done", savedTo: `postgres:${Settings.Name}` }); // the TRAINED model's name (CkptName is the startup-loaded one)
   else OnEvent({ kind: "train-error", message: `trainer exited with code ${Code} (see server console)` });
 };
 

@@ -54,3 +54,4 @@ Chat.db-*
 *.db-wal
 تقرير-*.md
 خطة-*.md
+.playwright-mcp

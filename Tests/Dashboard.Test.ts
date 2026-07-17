@@ -17,7 +17,7 @@ test("dashboard serves the control-panel page", async () => {
   const Handler = CreateDashboardHandler(await SeededStore());
   const Res = await Handler(new Request("http://x/"));
   expect(Res.headers.get("Content-Type")).toContain("text/html");
-  expect(await Res.text()).toContain("Control Plane"); // the SPA rebuild renamed the page title
+  expect(await Res.text()).toContain("Control panel"); // the SPA rebuild renamed the page title
 });
 
 test("/api/stats aggregates tiers/langs efficiently", async () => {

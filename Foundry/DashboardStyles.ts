@@ -1,4 +1,4 @@
-// Control-plane stylesheet (M14 rebuild). A token-based, dual-theme (dark default + light) design:
+// Control-panel stylesheet (M14 rebuild). A token-based, dual-theme (dark default + light) design:
 // sidebar + content shell, cards, per-kind accent colors, tables, pagination, the data-browser
 // filters, the document viewer modal, and the training loss sparkline. Kept in its own file (a plain
 // CSS string with NO backticks / no ${}) so DashboardHtml.ts can inline it and stay small. Themes:

@@ -1,4 +1,4 @@
-// Control-plane client logic (M14 rebuild). One WebSocket (/ws) for realtime system/model/stats/learn/
+// Control-panel client logic (M14 rebuild). One WebSocket (/ws) for realtime system/model/stats/learn/
 // train + load-model; REST for /api/kinds, /api/checkpoints, /api/browse* , /api/system, /api/model.
 // Seven views (Overview/Collect/Data/Train/Models/Chat/System) switched by a hash router; #chat is
 // the trace-capable chat surface (the legacy /chat page has no trace). IMPORTANT: this is inlined into a backtick template in

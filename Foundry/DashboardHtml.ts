@@ -1,4 +1,4 @@
-// The Foundry control-plane page (M14 rebuild) — a real sidebar+content app, not a single stuffed
+// The Foundry control-panel page (M14 rebuild) — a real sidebar+content app, not a single stuffed
 // panel. Six views (Overview / Collect / Data browser / Train / Models / System) plus the dedicated
 // /chat page, switched by a hash router. Manage everything: collect (per-kind, language-filtered),
 // review + clean the corpus (paginated Data browser), train (new OR resume/extend a saved model),
@@ -9,11 +9,11 @@
 import { DashboardStyles } from "./DashboardStyles.ts";
 import { DashboardScript } from "./DashboardScript.ts";
 
-export const DashboardHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shahd — Control Plane</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+export const DashboardHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shahd — Control panel</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
 <style>${DashboardStyles}</style></head><body>
 <div class="app">
  <aside class="side" id="side">
-  <div class="brand"><div class="logo">🧠</div><div><b>Shahd</b><span>control plane</span></div></div>
+  <div class="brand"><div class="logo">🧠</div><div><b>Shahd</b><span>control panel</span></div></div>
   <nav class="nav">
    <div class="sec">Workspace</div>
    <a data-v="overview" href="#overview" class="on"><span class="ic">◧</span> Overview</a>

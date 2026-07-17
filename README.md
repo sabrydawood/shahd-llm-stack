@@ -1,10 +1,12 @@
 # Shahd (شهد)
 
-A **from-scratch, fully-owned, code-specialized language model** written in TypeScript (Bun) with
-Go compute kernels. No open-source model weights, no fine-tuning of someone else's brain — the
-autograd engine, transformer, tokenizer, training loop, safety, tools, and reasoning are all built
-here and are meant to be evolved by their owner. Helper libraries (Zod, etc.) are fine; the *model*
-is owned.
+A **from-scratch, fully-owned LLM stack in TypeScript** (Bun) with native Go/C compute kernels —
+data engine → tokenizer → training → SFT → agent serving, all built here. No open-source model
+weights, no fine-tuning of someone else's brain: the autograd engine, transformer, tokenizer,
+training loop, safety, tools, and reasoning are owned and meant to be evolved by their owner.
+Helper libraries (Zod, etc.) are fine; the *stack* is owned. The released models are the proof it
+works end-to-end — see [Docs/POSITIONING.md](Docs/POSITIONING.md) for what exists around it and
+why this category is nearly empty.
 
 > **Status (honest):** the full pipeline is proven end-to-end and released as
 > [**v0.1.0**](https://github.com/sabrydawood/Shahd-ai-model/releases/tag/v0.1.0) — four trained
@@ -87,6 +89,7 @@ per-reply persisted reasoning): [Docs/screenshots/shahd-chat-full-conversation.p
 Full rules: [Docs/CONVENTIONS.md](Docs/CONVENTIONS.md). Design: [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md).
 File-by-file layout: [Docs/STRUCTURE.md](Docs/STRUCTURE.md). Where it's going: [Docs/ROADMAP.md](Docs/ROADMAP.md).
 Model sizes, hardware, and the scaling path: [Docs/MODEL-SCALING.md](Docs/MODEL-SCALING.md).
+Positioning + the competitive landscape: [Docs/POSITIONING.md](Docs/POSITIONING.md).
 
 ## Data
 

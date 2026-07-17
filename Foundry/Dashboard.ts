@@ -89,6 +89,7 @@ function ParseTrainSettings(Body: Record<string, unknown>): TrainSettings {
     KnowledgeMb: ToNum(Body["KnowledgeMb"], 0),
     ConvCount: ToNum(Body["ConvCount"], 4000),
     CodeSamples: ToNum(Body["CodeSamples"], 4000),
+    MultiTurn: ToNum(Body["MultiTurn"], 3000), // must pass the sanitizer or the CLI silently gets the default (the Workers lesson)
   };
 }
 type WsData = Record<string, never>;

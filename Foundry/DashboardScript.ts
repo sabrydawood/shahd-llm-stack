@@ -208,7 +208,8 @@ export const DashboardScript = `
    BlockSize:+Q('t-ctx').value,Merges:Math.max(0,vocab-256),BatchSize:+Q('t-batch').value,Workers:+Q('t-workers').value,
    Precision:Q('t-prec')?Q('t-prec').value:'F64',
    From:(tMode==='chat'&&Q('t-from'))?Q('t-from').value:'',
-   KnowledgeMb:+Q('t-know').value,ConvCount:+Q('t-conv').value,CodeSamples:+Q('t-code').value};}
+   KnowledgeMb:+Q('t-know').value,ConvCount:+Q('t-conv').value,CodeSamples:+Q('t-code').value,
+   MultiTurn:Q('t-multiturn')?+Q('t-multiturn').value:3000};}
  function tStart(){if(!wsReady())return;save();WS.send(JSON.stringify({type:'train',settings:trainSettings()}));}
  function tStop(){if(wsReady()){WS.send(JSON.stringify({type:'train-stop'}));Q('t-start').textContent='stopping…';Q('t-start').disabled=true;}}
  function setTrainBtn(run){training=run;setJobs();var b=Q('t-start');b.disabled=false;
@@ -320,7 +321,7 @@ export const DashboardScript = `
   };}
 
  // ── settings persistence ──
- var FIELDS=['c-query','c-repos','c-minlevel','c-maxrepos','c-maxfiles','c-maxmb','c-maxkb','c-skip','t-name','t-steps','t-embed','t-layers','t-heads','t-ctx','t-vocab','t-batch','t-workers','t-corpus','t-know','t-conv','t-code','t-from','t-prec'];
+ var FIELDS=['c-query','c-repos','c-minlevel','c-maxrepos','c-maxfiles','c-maxmb','c-maxkb','c-skip','t-name','t-steps','t-embed','t-layers','t-heads','t-ctx','t-vocab','t-batch','t-workers','t-corpus','t-know','t-conv','t-code','t-from','t-prec','t-multiturn'];
  function save(){var o={};FIELDS.forEach(function(id){var el=Q(id);if(!el)return;o[id]=el.type==='checkbox'?el.checked:el.value;});try{localStorage.setItem('shahd.cfg',JSON.stringify(o));}catch(e){}}
  function restore(){try{var o=JSON.parse(localStorage.getItem('shahd.cfg')||'{}');FIELDS.forEach(function(id){if(o[id]===undefined)return;var el=Q(id);if(!el)return;if(el.type==='checkbox')el.checked=!!o[id];else el.value=o[id];});}catch(e){}}
 

@@ -64,6 +64,7 @@ export type TrainSettings = {
   KnowledgeMb: number;
   ConvCount: number;
   CodeSamples: number;
+  MultiTurn?: number; // stitched 2-3 exchange conversations (the second-message fix); ~15-25% of the mix
 };
 
 export type TrainEvent =

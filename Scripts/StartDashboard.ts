@@ -35,7 +35,9 @@ import { DefaultSampling } from "../Brain/Sampling/Sampler.ts";
 import { SeededRng } from "../Brain/Random/SeededRng.ts";
 import { ResolveFoundryStores, GitHubToken } from "./FoundryEnv.ts";
 import { ReadArg } from "./ScriptArgs.ts";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const DbUrl = process.env["DATABASE_URL"];
 // ONE shared checkpoint-store pool for the whole dashboard lifetime — reused by reload/list/delete
@@ -423,11 +425,14 @@ async function PumpLines(Stream: ReadableStream<Uint8Array<ArrayBuffer>>, OnLine
 const Train: TrainFn = async (Settings, OnEvent, Signal) => {
   // pretrain -> base model (TrainOnFoundry); chat -> SFT chat model (TrainSftChat). Both workers emit
   // the same {Step,TrainLoss,ElapsedMs} progress lines, so ParseTrainLine handles either identically.
+  // Stop is GRACEFUL: the train loops are synchronous (stdin/IPC would starve), so the stop signal is
+  // a file the child polls once per step — it saves a checkpoint at the EXACT current step and exits 0.
+  const StopFile = join(tmpdir(), `shahd-train-stop-${process.pid}-${Date.now()}`);
   const Common = [
     `--Name=${Settings.Name}`, `--Steps=${Settings.Steps}`, `--Merges=${Settings.Merges}`,
     `--EmbedDim=${Settings.EmbedDim}`, `--Layers=${Settings.NumLayers}`, `--Heads=${Settings.NumHeads}`,
     `--Block=${Settings.BlockSize}`, `--Batch=${Settings.BatchSize}`, `--Workers=${Settings.Workers ?? 0}`,
-    `--Precision=${Settings.Precision ?? "F64"}`,
+    `--Precision=${Settings.Precision ?? "F64"}`, `--StopFile=${StopFile}`,
     ...(Settings.Resume ? ["--Resume"] : []), // continue/EXTEND an existing checkpoint of this name
   ];
   const Args = Settings.Kind === "chat"
@@ -437,11 +442,27 @@ const Train: TrainFn = async (Settings, OnEvent, Signal) => {
     : ["bun", "run", "Scripts/TrainOnFoundry.ts", ...Common, `--CorpusMb=${Settings.CorpusMb}`, `--KnowledgeMb=${Settings.KnowledgeMb}`];
   console.log(`[train] ${Settings.Kind} "${Settings.Name}": ${Settings.Steps} steps`);
   const Proc = Bun.spawn(Args, { stdout: "pipe", stderr: "pipe", env: { ...process.env } });
+  let KillTimer: ReturnType<typeof setTimeout> | null = null;
   const OnAbort = (): void => {
     try {
-      Proc.kill();
+      // Ask nicely first: the child sees the stop file at the next step boundary, saves the exact-step
+      // checkpoint, and exits 0. Hard-kill only if it hasn't exited after the grace window (a save on
+      // a big model takes a while — the periodic checkpoint still bounds the loss).
+      writeFileSync(StopFile, "stop");
+      OnEvent({ kind: "train-info", text: "stop requested — finishing the current step and saving a checkpoint at it…" });
+      KillTimer = setTimeout(() => {
+        try {
+          Proc.kill();
+        } catch {
+          // already exited
+        }
+      }, 180_000);
     } catch {
-      // already exited
+      try {
+        Proc.kill();
+      } catch {
+        // already exited
+      }
     }
   };
   Signal?.addEventListener("abort", OnAbort);
@@ -457,8 +478,16 @@ const Train: TrainFn = async (Settings, OnEvent, Signal) => {
   ]);
   const Code = await Proc.exited;
   Signal?.removeEventListener("abort", OnAbort);
-  if (Signal?.aborted === true) OnEvent({ kind: "train-error", message: "stopped by user — last saved checkpoint is kept; press Train to resume" });
-  else if (Code === 0) OnEvent({ kind: "train-done", savedTo: `postgres:${Settings.Name}` }); // the TRAINED model's name (CkptName is the startup-loaded one)
+  if (KillTimer !== null) clearTimeout(KillTimer);
+  rmSync(StopFile, { force: true });
+  if (Signal?.aborted === true) {
+    OnEvent({
+      kind: "train-error",
+      message: Code === 0
+        ? "paused — checkpoint saved at the exact step you stopped at; press Train (Resume) to continue from there"
+        : "stopped — last periodic checkpoint is kept; press Train (Resume) to continue",
+    });
+  } else if (Code === 0) OnEvent({ kind: "train-done", savedTo: `postgres:${Settings.Name}` }); // the TRAINED model's name (CkptName is the startup-loaded one)
   else OnEvent({ kind: "train-error", message: `trainer exited with code ${Code} (see server console)` });
 };
 

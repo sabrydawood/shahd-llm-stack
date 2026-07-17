@@ -33,6 +33,7 @@ import { PostgresCheckpointStore } from "../Foundry/PostgresCheckpointStore.ts";
 import { ActivateFromConfig } from "../Brain/ComputeBackend/BackendSelector.ts";
 import { ResolveFoundryStores } from "./FoundryEnv.ts";
 import { ReadArg, ReadFlag } from "./ScriptArgs.ts";
+import { existsSync } from "node:fs";
 
 // Specials reserved above the BPE vocab: EOS + the FIM sentinels + the chat/tool control tokens —
 // all reserved unconditionally so a later run (or resume of one) doesn't shift the vocab / token ids.
@@ -211,21 +212,31 @@ if (Measure) {
   process.exit(0);
 }
 
-// Train in chunks, saving a checkpoint after each — a crash or Stop loses AT MOST CheckEvery steps,
-// and re-running resumes from the last saved checkpoint (nothing done is thrown away).
+// Train in chunks, saving a checkpoint after each — a crash loses AT MOST CheckEvery steps, and
+// re-running resumes from the last saved checkpoint (nothing done is thrown away). A graceful pause
+// (--StopFile appears — the dashboard's Stop button) saves at the EXACT step instead: TrainLoop polls
+// the file once per step and returns early, we checkpoint at that step and exit 0.
+const StopFile = ReadArg("--StopFile=", "");
+const ShouldStop = StopFile === "" ? undefined : (): boolean => existsSync(StopFile);
 const CheckEvery = Math.max(50, Math.floor(EffectiveSteps / 20)); // ~20 saves across the run
 function BuildAt(Step: number): Checkpoint {
   return BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: EffectiveSteps, Step, Corpus: "foundry-filtered" }, { Kind: "Bpe", Merges: Bpe.Merges, Specials: BaseSpecials });
 }
 for (let Start = StartStep; Start < EffectiveSteps; Start += CheckEvery) {
   const End = Math.min(Start + CheckEvery, EffectiveSteps);
-  TrainLoop(Model, Optimizer, TrainLoader, ValLoader, Config, RunLogger, OnStep, { StartStep: Start, EndStep: End, StartMs: GlobalStart }, Pool);
-  const Ckpt = BuildAt(End);
+  const Reached = TrainLoop(Model, Optimizer, TrainLoader, ValLoader, Config, RunLogger, OnStep, { StartStep: Start, EndStep: End, StartMs: GlobalStart }, Pool, ShouldStop);
+  const Ckpt = BuildAt(Reached);
   if (CkptStore !== null) {
     await CkptStore.Save(CkptName, Ckpt, new Date().toISOString());
-    console.log(`checkpoint saved at step ${End}/${EffectiveSteps}`);
+    console.log(`checkpoint saved at step ${Reached}/${EffectiveSteps}`);
   } else {
     WriteCheckpointObject(SavePath, Ckpt);
+  }
+  if (Reached < End) {
+    console.log(`paused by user at step ${Reached}/${EffectiveSteps} — checkpoint saved; press Train again to resume from exactly here`);
+    if (CkptStore !== null) await CkptStore.Close();
+    Pool?.Dispose();
+    process.exit(0);
   }
 }
 if (CkptStore !== null) {

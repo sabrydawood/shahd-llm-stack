@@ -33,6 +33,7 @@ import { CreateTrainWorkerPool } from "../Brain/Training/WorkerPool.ts";
 import { StripThinking } from "../Brain/Reasoning/ThinkingMode.ts";
 import { ResolveFoundryStores } from "./FoundryEnv.ts";
 import { ReadArg, ReadFlag } from "./ScriptArgs.ts";
+import { existsSync } from "node:fs";
 
 const Name = ReadArg("--Name=", "Chat");
 const Steps = Number(ReadArg("--Steps=", "600"));
@@ -233,6 +234,9 @@ function BuildAt(Step: number): Checkpoint {
   return BuildCheckpoint(Model, Optimizer, Rng, { FinalStep: Steps, Step, Corpus: "sft-owned", Format: "chat", ...(Warm !== null ? { From } : {}) }, { Kind: "Bpe", Merges: Bpe.Merges, Specials });
 }
 const CheckEvery = Math.max(50, Math.floor(Steps / 20));
+// Graceful pause (--StopFile appears — the dashboard's Stop button): checked once per step so the
+// checkpoint lands on the EXACT step the user stopped at, not the last periodic save.
+const StopFile = ReadArg("--StopFile=", "");
 for (let Step = StartStep; Step < Steps; Step++) {
   const CurrentLr = ComputeLr(Step, Config);
   let MeanLoss: number;
@@ -262,6 +266,15 @@ for (let Step = StartStep; Step < Steps; Step++) {
   if (CkptStore !== null && (Step + 1) % CheckEvery === 0) {
     await CkptStore.Save(Name, BuildAt(Step + 1), new Date().toISOString());
     console.log(`checkpoint "${Name}" saved at step ${Step + 1}/${Steps}`);
+  }
+  if (StopFile !== "" && Step + 1 < Steps && existsSync(StopFile)) {
+    if (CkptStore !== null) {
+      await CkptStore.Save(Name, BuildAt(Step + 1), new Date().toISOString());
+      await CkptStore.Close();
+    }
+    console.log(`paused by user at step ${Step + 1}/${Steps} — checkpoint "${Name}" saved; press Train again to resume from exactly here`);
+    Pool?.Dispose();
+    process.exit(0);
   }
 }
 if (CkptStore !== null) {

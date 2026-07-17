@@ -19,6 +19,9 @@ function Round(X: number): number {
 // run; a caller can train in chunks (saving a checkpoint between them) by advancing the range while
 // the model/optimizer/RNG carry over. The LR schedule always uses the GLOBAL step, so chunking is
 // numerically identical to one continuous run.
+// Returns the first step NOT executed: EndStep normally, or the current step when ShouldStop fired —
+// so the caller can checkpoint at the EXACT pause point. ShouldStop must be synchronous (this loop
+// blocks the event loop for its whole range); it is polled once per step, before the step runs.
 export function TrainLoop(
   Model: Shahd,
   Optimizer: Optimizer,
@@ -29,13 +32,15 @@ export function TrainLoop(
   OnStep?: (Step: number, TrainLoss: number, ElapsedMs: number) => void, // lightweight per-step hook (no eval)
   Range?: { StartStep: number; EndStep: number; StartMs: number },
   Pool?: TrainWorkerPool | null, // sequence-parallel accumulation (Config.Training.Workers); null/undefined = sequential
-): void {
+  ShouldStop?: () => boolean,
+): number {
   const MaxSteps = Config.Schedule.MaxSteps;
   const StartStep = Range?.StartStep ?? 0;
   const EndStep = Range?.EndStep ?? MaxSteps;
   const StartMs = Range?.StartMs ?? Date.now();
 
   for (let Step = StartStep; Step < EndStep; Step++) {
+    if (ShouldStop?.() === true) return Step;
     const Lr = ComputeLr(Step, Config);
     // The pooled path is a drop-in: same loader order, same 1/BatchSize grad scaling, same mean
     // loss — only WHERE each sequence's ForwardBackward runs changes (see WorkerPool.ts).
@@ -64,4 +69,5 @@ export function TrainLoop(
       });
     }
   }
+  return EndStep;
 }

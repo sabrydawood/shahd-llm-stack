@@ -168,6 +168,7 @@ export function CreateDashboardParts(Store: DocumentStore, Learn?: LearnFn, Opti
   const TrainEmit = (Event: TrainEvent): void => {
     TrainJob.Events.push(Event); // sparse (one per eval interval) — buffer so reconnects see progress
     Publish({ type: "train", event: Event });
+    console.log("TrainEmit", Event);
     if (Event.kind === "train-done" || Event.kind === "train-error") {
       TrainJob.Running = false;
       if (Event.kind === "train-done") {

@@ -64,9 +64,11 @@ const ArithmeticCount = Number(ReadArg("--Arithmetic=", "2000"));
 const ThinkingCount = Number(ReadArg("--Thinking=", "800"));
 const CodeConvs = Number(ReadArg("--CodeConvs=", "800"));
 // Multi-turn stitched conversations — the turn-transition coverage single exchanges can't teach.
-// Weighted at ~15% of a default mix so "answer the NEXT question after a finished exchange" is a
-// first-class behavior, not a rarity.
-const MultiTurn = Number(ReadArg("--MultiTurn=", "1500"));
+// Weighted high (~25% of a default mix) so "answer the NEXT question after a finished exchange" is
+// a first-class behavior: 1500 (~7% of rendered sequences next to a large real-dialogue mix) moved
+// second-turn behavior but didn't lock it in; the other behaviors are long since saturated on a
+// mature checkpoint, so the heavier dose costs them nothing.
+const MultiTurn = Number(ReadArg("--MultiTurn=", "3000"));
 const Stores = ResolveFoundryStores();
 const CodeDocs = await Stores.Kind("code").ByTier("Filtered", CodeSamples);
 const ConvDocs = await Stores.Kind("conversation").ByTier("Filtered", ConvCount);

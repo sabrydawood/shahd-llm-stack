@@ -9,7 +9,7 @@ works end-to-end — see [Docs/POSITIONING.md](Docs/POSITIONING.md) for what exi
 why this category is nearly empty.
 
 > **Status (honest):** the full pipeline is proven end-to-end and released as
-> [**v0.1.0**](https://github.com/sabrydawood/Shahd-ai-model/releases/tag/v0.1.0) — four trained
+> [**v0.1.0**](https://github.com/sabrydawood/shahd-llm-stack/releases/tag/v0.1.0) — four trained
 > checkpoints, flagship **MicroChat (6.56M params)**: it greets, calls its calculator tool with
 > correct arguments, answers identity questions, holds short multi-turn exchanges, and shows its
 > full reasoning (think → tool → answer) live in the dashboard, persisted with every reply. These
@@ -37,7 +37,7 @@ bun run foundry:dashboard            # control plane: collect data -> train -> c
 
 ## Trained models (v0.1.0)
 
-Downloadable from the [release page](https://github.com/sabrydawood/Shahd-ai-model/releases/tag/v0.1.0).
+Downloadable from the [release page](https://github.com/sabrydawood/shahd-llm-stack/releases/tag/v0.1.0).
 Each `.ckpt` is the **full training state** (weights + AdamW moments + RNG + tokenizer + config,
 checksummed), so a downloaded model can be run — `LoadRunnableModel(path)` from
 `Brain/Checkpoint/LoadRunnableModel.ts` — and also resumed (trained further) bit-identically.

@@ -6,9 +6,15 @@ autograd engine, transformer, tokenizer, training loop, safety, tools, and reaso
 here and are meant to be evolved by their owner. Helper libraries (Zod, etc.) are fine; the *model*
 is owned.
 
-> **Status (honest):** the engine is complete and gradcheck-verified (96 tests green). The shipped
-> models are tiny (0.2M–1.1M params) trained on toy corpora — real capability needs scale (params ×
-> data × compute), which the roadmap below builds toward. See [Docs/ROADMAP.md](Docs/ROADMAP.md).
+> **Status (honest):** the full pipeline is proven end-to-end and released as
+> [**v0.1.0**](https://github.com/sabrydawood/Shahd-ai-model/releases/tag/v0.1.0) — four trained
+> checkpoints, flagship **MicroChat (6.56M params)**: it greets, calls its calculator tool with
+> correct arguments, answers identity questions, holds short multi-turn exchanges, and shows its
+> full reasoning (think → tool → answer) live in the dashboard, persisted with every reply. These
+> are tiny CPU-trained models — they master their trained distribution, not open-ended fluency;
+> real capability needs scale (see [Docs/MODEL-SCALING.md](Docs/MODEL-SCALING.md)).
+
+![Chat with the live reasoning trace](Docs/screenshots/shahd-chat-reasoning.png)
 
 ## Quickstart
 
@@ -26,6 +32,28 @@ bun run Scripts/ComputeSpike.ts 512  # benchmark TS vs Go FFI matmul
 
 bun run foundry:dashboard            # control plane: collect data -> train -> chat (http://localhost:8090)
 ```
+
+## Trained models (v0.1.0)
+
+Downloadable from the [release page](https://github.com/sabrydawood/Shahd-ai-model/releases/tag/v0.1.0).
+Each `.ckpt` is the **full training state** (weights + AdamW moments + RNG + tokenizer + config,
+checksummed), so a downloaded model can be run — `LoadRunnableModel(path)` from
+`Brain/Checkpoint/LoadRunnableModel.ts` — and also resumed (trained further) bit-identically.
+
+| Model | Params | Architecture | Kind |
+|-------|--------|--------------|------|
+| **MicroChat** | 6.56M | emb 256 · 6L · 4h · ctx 512 | chat — tools, thinking, multi-turn |
+| NanoChat2 | 2.55M | emb 192 · 4L · 4h · ctx 256 | chat — balanced mix |
+| NanoChat | 2.55M | emb 192 · 4L · 4h · ctx 256 | chat — first mix (comparison) |
+| foundry | 1.12M | emb 128 · 4L · 4h · ctx 256 | base — autocomplete |
+
+<p>
+<img src="Docs/screenshots/shahd-models.png" width="49%" alt="Models view">
+<img src="Docs/screenshots/shahd-train.png" width="49%" alt="Train panel">
+</p>
+
+The full acceptance conversation (greeting → calculator tool call → identity, one conversation,
+per-reply persisted reasoning): [Docs/screenshots/shahd-chat-full-conversation.png](Docs/screenshots/shahd-chat-full-conversation.png).
 
 ## Architecture (layered, `Brain/`)
 
@@ -58,6 +86,7 @@ bun run foundry:dashboard            # control plane: collect data -> train -> c
 
 Full rules: [Docs/CONVENTIONS.md](Docs/CONVENTIONS.md). Design: [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md).
 File-by-file layout: [Docs/STRUCTURE.md](Docs/STRUCTURE.md). Where it's going: [Docs/ROADMAP.md](Docs/ROADMAP.md).
+Model sizes, hardware, and the scaling path: [Docs/MODEL-SCALING.md](Docs/MODEL-SCALING.md).
 
 ## Data
 
